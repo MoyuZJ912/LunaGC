@@ -54,7 +54,60 @@ public final class DatabaseHelper {
      * @param object The object to save.
      */
     public static void saveGameAsync(Object object) {
-        DatabaseHelper.eventExecutor.submit(() -> DatabaseManager.getGameDatastore().save(object));
+        DatabaseHelper.eventExecutor.submit(
+                () -> {
+                    try {
+                        DatabaseManager.getGameDatastore().save(object);
+                    } catch (com.mongodb.MongoWriteException e) {
+                        if (e.getError() != null && e.getError().getCode() == 11000) {
+                            // Duplicate key: the entity was already persisted (race).
+                            // Retry once - after the first insert the id is reflected back,
+                            // so this second save becomes a replace instead of an insert.
+                            try {
+                                DatabaseManager.getGameDatastore().save(object);
+                                Grasscutter.getLogger().debug(
+                                        "saveGameAsync duplicate-key retry succeeded for "
+                                                + object.getClass().getSimpleName());
+                            } catch (Throwable t) {
+                                Grasscutter.getLogger().error(
+                                        "saveGameAsync FAILED for " + object.getClass().getSimpleName(), t);
+                            }
+                        } else {
+                            Grasscutter.getLogger().error(
+                                    "saveGameAsync FAILED for " + object.getClass().getSimpleName(), e);
+                        }
+                    } catch (java.util.ConcurrentModificationException e) {
+                        // Player collections are being modified concurrently (e.g. during
+                        // player connect/initialization) while we encode the entity.
+                        // Retry with a short backoff so the modifying thread settles.
+                        boolean ok = false;
+                        for (int i = 0; i < 8 && !ok; i++) {
+                            try {
+                                Thread.sleep(100);
+                                DatabaseManager.getGameDatastore().save(object);
+                                ok = true;
+                                Grasscutter.getLogger().debug(
+                                        "saveGameAsync CME retry succeeded for "
+                                                + object.getClass().getSimpleName());
+                            } catch (java.util.ConcurrentModificationException e2) {
+                                // keep retrying
+                            } catch (Throwable t) {
+                                Grasscutter.getLogger().error(
+                                        "saveGameAsync FAILED for " + object.getClass().getSimpleName(), t);
+                                break;
+                            }
+                        }
+                        if (!ok) {
+                            Grasscutter.getLogger().error(
+                                    "saveGameAsync FAILED for " + object.getClass().getSimpleName()
+                                            + " (ConcurrentModificationException after retries)",
+                                    e);
+                        }
+                    } catch (Throwable t) {
+                        Grasscutter.getLogger().error(
+                                "saveGameAsync FAILED for " + object.getClass().getSimpleName(), t);
+                    }
+                });
     }
 
     /**

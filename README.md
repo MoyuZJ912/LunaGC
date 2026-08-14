@@ -1,5 +1,40 @@
 # LunaGC-6.7.0 WIP
 
+## Changes in this fork
+
+This fork is based on [girluh/LunaGC](https://github.com/girluh/LunaGC) (`6.7.0` branch) with the following additions for a private-server deployment:
+
+### Account & authentication
+- Password login locks the entered password (BCrypt-hashed) on first login, covering both auto-created accounts and legacy accounts with an empty password. `Account.verifyPassword` now accepts both BCrypt-hashed and legacy plaintext passwords.
+- Combo-login and stoken verification are lenient: if the stored session key differs (e.g. the client cached a token from another session/server), the client's token is adopted so login succeeds instead of failing with a session-key error.
+- Added the `ma-cn-passport` API routes (`/account/ma-cn-passport/...`) used by the CN SDK client, and marked accounts as adult / email-verified in the passport response.
+
+### Mail
+- `GetAllMailResultNotify` now sends `retcode 0`, total page count and page index, which the 6.7 client needs to display the mailbox.
+
+### Activities & announcements
+- Added activity, announcement and game-announcement configs (`data/ActivityConfig.json`, `data/Announcement.json`, `data/GameAnnouncement.json`, `data/GameAnnouncementList.json`).
+- Quest event executor pool reduced to a single thread to avoid quest-state races.
+
+### Gacha & shop
+- Updated banner pool configs (`data/Banners.json`).
+- Mapped the 6.7 obfuscated shop field name (`costItems` alias `KPCDDDCMLNB`) in `ShopGoodsData` and made cost-item handling null-safe in `ShopInfo`; trimmed `data/Shop.json`.
+
+### Co-op world & movement
+- Joining / leaving / kicking in multiplayer now uses the `ENTER_OTHER` enter type instead of `ENTER_SELF`. The 6.7 client does not reload the scene on `ENTER_SELF`, which previously left the host stuck on the loading screen and caused "internal server error" when leaving multiplayer.
+- Same-scene `/tp` (COMMAND teleport) now also broadcasts a reposition to co-op peers, so they see the teleport.
+- Co-op movement sync: the 6.7 client ignores movement carried inside `CombatInvocationsNotify`, so avatar movement is rebroadcast to peers as a single `SceneEntityAppearNotify` (`VISION_REPLACE`) every 100ms while the avatar is moving; idle motion states are skipped. This gives position sync without animation (a temporary workaround until real movement broadcasting is re-enabled upstream).
+
+### Drop / chest configs
+- Added drop, chest, dungeon-drop, energy-drop and blossom configs (`data/ChestDrop.json`, `data/ChestReward.json`, `data/Drop.json`, `data/DungeonDrop.json`, `data/EnergyDrop.json`, `data/BlossomConfig.json`).
+
+### Infrastructure
+- `DatabaseHelper.saveGameAsync` now retries MongoDB duplicate-key (11000) and `ConcurrentModificationException` failures instead of silently losing saves.
+- Dispatch `RegionHandler` resolves the game-server address and dispatch domain per request (configured address → request host → bind address), so clients on localhost / LAN / public IP / domain can all join.
+- The console input loop returns cleanly when stdin closes (EOF) instead of spinning and flooding the log.
+
+**Note:** this repository contains no credentials, keys, IP addresses or other server secrets.
+
 ## Note from the maintainer
 Might update to latest occasionally, depends on how I'm feeling and my situation. Of course, I post the protocol buffer definitions on [GitLab](https://gitlab.com/kitkat-multiverse/genshin-protocol) and translations. Contact me at my [Discord](https://discord.gg/5Rfyjrt5aB)
 

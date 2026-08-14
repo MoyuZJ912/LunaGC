@@ -34,8 +34,8 @@ public final class QuestManager extends BasePlayerManager {
 
     public static final ExecutorService eventExecutor =
             new ThreadPoolExecutor(
-                    4,
-                    4,
+                    1,
+                    1,
                     60,
                     TimeUnit.SECONDS,
                     new LinkedBlockingDeque<>(1000),

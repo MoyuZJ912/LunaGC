@@ -26,6 +26,11 @@ import emu.grasscutter.server.packet.send.PacketEntityFightPropUpdateNotify;
 @Opcodes(PacketOpcodes.CombatInvocationsNotify)
 public class HandlerCombatInvocationsNotify extends PacketHandler {
 
+    // Co-op movement rebroadcast throttle. The 6.7 client ignores
+    // CombatInvocations-notify movement, so we relocate peers with a single
+    // SceneEntityAppearNotify (replace) every 100ms while the avatar is moving.
+    private static final long MOVE_THROTTLE_MS = 100;
+
     private float cachedLandingSpeed = 0;
     private long cachedLandingTimeMillisecond = 0;
     private boolean monitorLandingEvent = false;
@@ -183,6 +188,16 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
                             }
                         }
 
+                        // Co-op movement: rebroadcast our own movement to peers as a
+                        // position snap (the 6.7 client ignores CombatInvocations-notify
+                        // movement), throttled to 100ms while moving.
+                        if (entity instanceof EntityAvatar
+                                && session.getPlayer().getWorld() != null
+                                && session.getPlayer().getWorld().isMultiplayer()) {
+                            maybeBroadcastRelocate(session.getPlayer(), entity, motionState);
+                            continue;
+                        }
+
                         if (motionState == MotionState.MotionState_MOTION_NOTIFY
                                 || motionState == MotionState.MotionState_MOTION_FIGHT) {
                             continue;
@@ -204,6 +219,36 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
             }
 
             session.getPlayer().getCombatInvokeHandler().addEntry(entry.getForwardType(), entry);
+        }
+    }
+
+    private void maybeBroadcastRelocate(Player player, GameEntity entity, MotionState state) {
+        // Idle / transient states carry no meaningful position change.
+        switch (state) {
+            case MotionState_MOTION_NONE,
+                    MotionState_MOTION_RESET,
+                    MotionState_MOTION_STANDBY,
+                    MotionState_MOTION_SIT_IDLE,
+                    MotionState_MOTION_CROUCH_IDLE,
+                    MotionState_MOTION_SWIM_IDLE,
+                    MotionState_MOTION_FLY_IDLE,
+                    MotionState_MOTION_LADDER_IDLE,
+                    MotionState_MOTION_DIVE_IDLE,
+                    MotionState_MOTION_DIVE_SWIM_IDLE,
+                    MotionState_MOTION_DANGER_STANDBY,
+                    MotionState_MOTION_VEHICLE_STANDBY,
+                    MotionState_MOTION_NOTIFY -> {
+                return;
+            }
+            default -> {}
+        }
+
+        // Everything else (walk/run/dash/climb/fly/jump/drop/land/plunge/teleport)
+        // is relocated to peers every 100ms.
+        long now = System.currentTimeMillis();
+        if (now - entity.getLastMoveTeleportBroadcastMs() >= MOVE_THROTTLE_MS) {
+            entity.setLastMoveTeleportBroadcastMs(now);
+            player.getScene().broadcastRelocateToOthers(player, entity);
         }
     }
 

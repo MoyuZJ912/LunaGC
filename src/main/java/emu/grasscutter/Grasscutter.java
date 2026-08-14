@@ -338,8 +338,8 @@ public final class Grasscutter {
                     Runtime.getRuntime().exit(0);
                 }
             } catch (EndOfFileException e) {
-                logger.info("EOF detected.");
-                continue;
+                logger.info("EOF detected; console input closed, disabling console.");
+                return;
             } catch (IOError e) {
                 logger.error("An IO error occurred while trying to read from console.", e);
                 return;

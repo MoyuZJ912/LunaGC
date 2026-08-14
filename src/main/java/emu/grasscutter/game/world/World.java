@@ -455,6 +455,15 @@ public class World implements Iterable<Player> {
                 player.getRotation().set(teleportProperties.getTeleportRot());
             }
             player.sendPacket(new PacketSceneEntityAppearNotify(player));
+
+            // In multiplayer, also relocate the player for co-op peers. The same-scene
+            // COMMAND path otherwise only refreshes the player's own client, so peers
+            // would never see the teleport.
+            if (player.getWorld().isMultiplayer()) {
+                player.getScene()
+                        .broadcastRelocateToOthers(
+                                player, player.getTeamManager().getCurrentAvatarEntity());
+            }
             return true;
         }
 

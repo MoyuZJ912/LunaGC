@@ -61,6 +61,10 @@ public abstract class GameEntity {
 
     @Getter @Setter private int lastMoveReliableSeq;
 
+    // Epoch-ms timestamp of the last time this entity's movement was rebroadcast
+    // to co-op peers as a teleport (see HandlerCombatInvocationsNotify ENTITY_MOVE).
+    @Getter @Setter private long lastMoveTeleportBroadcastMs = 0;
+
     @Getter @Setter private boolean lockHP;
     private boolean limbo;
     private float limboHpThreshold;

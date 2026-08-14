@@ -1167,6 +1167,24 @@ public class Scene {
         }
     }
 
+    /**
+     * Relocate an entity for co-op peers using a single "replace" appear notify.
+     *
+     * <p>The 6.7 client ignores CombatInvocations-notify movement, so position sync for peers is
+     * done by replacing the entity in place. Only an appear is sent (no preceding disappear) to
+     * minimise packet count and avoid the born/remove flicker.
+     */
+    public void broadcastRelocateToOthers(Player excludedPlayer, GameEntity entity) {
+        if (entity == null) {
+            return;
+        }
+
+        this.broadcastPacketToOthers(
+                excludedPlayer,
+                new PacketSceneEntityAppearNotify(
+                        entity, VisionType.VisionType_VISION_REPLACE, entity.getId()));
+    }
+
     public void addItemEntity(int itemId, int amount, GameEntity bornForm) {
         ItemData itemData = GameData.getItemDataMap().get(itemId);
         if (itemData == null) {

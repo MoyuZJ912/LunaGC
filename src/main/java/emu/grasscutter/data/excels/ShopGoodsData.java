@@ -18,6 +18,7 @@ public class ShopGoodsData extends GameResource {
     private int costHcoin;
     private int costMcoin;
 
+    @SerializedName(value = "costItems", alternate = {"KPCDDDCMLNB"})
     private List<ItemParamData> costItems;
     private int minPlayerLevel;
     private int maxPlayerLevel;
