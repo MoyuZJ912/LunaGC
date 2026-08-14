@@ -92,3 +92,6 @@ patches/*.patch
 
 # Artifact Signatures
 *.asc
+
+# Private project documentation (contains internal IPs/paths/accounts) - do not push
+PROJECT.md
