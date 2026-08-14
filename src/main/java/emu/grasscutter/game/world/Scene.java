@@ -555,6 +555,16 @@ public class Scene {
             }
         }
 
+        // Activity watcher: notify the activity system that a monster died.
+        if (target instanceof EntityMonster monster && attacker instanceof EntityAvatar avatarAttacker) {
+            var monsterId = String.valueOf(monster.getMonsterData().getId());
+            var activityManager = avatarAttacker.getPlayer().getActivityManager();
+            activityManager.triggerWatcher(
+                    WatcherTriggerType.TRIGGER_BATTLE_FOR_MONSTER_DIE_OR, monsterId);
+            activityManager.triggerWatcher(
+                    WatcherTriggerType.TRIGGER_KILL_MONSTERS_WITHOUT_VEHICLE, monsterId);
+        }
+
         this.broadcastPacket(new PacketLifeStateChangeNotify(attackerId, target, LifeState.LIFE_DEAD));
 
         var world = this.getWorld();

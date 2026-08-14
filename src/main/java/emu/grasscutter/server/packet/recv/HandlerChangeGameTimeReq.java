@@ -12,9 +12,11 @@ public class HandlerChangeGameTimeReq extends PacketHandler {
     public void handle(GameSession session, byte[] header, byte[] payload) throws Exception {
         var req = ChangeGameTimeReq.parseFrom(payload);
 
-        session.getPlayer().getWorld().changeTime(req.getGameTime(), req.getExtraDays());
-        session
-                .getPlayer()
-                .sendPacket(new PacketChangeGameTimeRsp(session.getPlayer(), req.getExtraDays()));
+        var player = session.getPlayer();
+        var world = player.getWorld();
+        world.changeTime(req.getGameTime(), req.getExtraDays());
+        // Broadcast the new time so the client's clock and scene actually update.
+        world.updateTime();
+        player.sendPacket(new PacketChangeGameTimeRsp(player, req.getExtraDays()));
     }
 }
