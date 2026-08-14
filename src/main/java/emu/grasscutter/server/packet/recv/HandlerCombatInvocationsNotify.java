@@ -22,6 +22,8 @@ import emu.grasscutter.net.proto.PlayerDieTypeOuterClass;
 import emu.grasscutter.server.event.entity.EntityMoveEvent;
 import emu.grasscutter.server.game.GameSession;
 import emu.grasscutter.server.packet.send.PacketEntityFightPropUpdateNotify;
+import emu.grasscutter.server.packet.send.PacketScenePlayerLocationNotify;
+import emu.grasscutter.server.packet.send.PacketWorldPlayerLocationNotify;
 
 @Opcodes(PacketOpcodes.CombatInvocationsNotify)
 public class HandlerCombatInvocationsNotify extends PacketHandler {
@@ -30,6 +32,17 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
     // CombatInvocations-notify movement, so we relocate peers with a single
     // SceneEntityAppearNotify (replace) every 100ms while the avatar is moving.
     private static final long MOVE_THROTTLE_MS = 100;
+
+    /**
+     * Movement broadcast method for co-op peers, toggled by /smcm (host only).
+     *
+     * <p>{@code false} (default, "tp"): relocate peers via a single
+     * SceneEntityAppearNotify(VISION_REPLACE) every 100ms — the working fallback.
+     *
+     * <p>{@code true} ("normal"): rebroadcast the mover's EntityMoveInfo to peers
+     * through the 6.7 SceneEntitiesMoveCombineNotify(1679) channel.
+     */
+    public static volatile boolean useSceneEntityMoveNotify = false;
 
     private float cachedLandingSpeed = 0;
     private long cachedLandingTimeMillisecond = 0;
@@ -188,13 +201,15 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
                             }
                         }
 
-                        // Co-op movement: rebroadcast our own movement to peers as a
-                        // position snap (the 6.7 client ignores CombatInvocations-notify
-                        // movement), throttled to 100ms while moving.
+                        // Co-op movement: rebroadcast our own movement to peers.
+                        //  - "normal": broadcast the official 6.7 player-location notify
+                        //    (WorldPlayerLocationNotify + ScenePlayerLocationNotify), the
+                        //    channel the 6.7 client actually uses for co-op movement.
+                        //  - "tp" (default): relocate peers with a VISION_REPLACE snap.
                         if (entity instanceof EntityAvatar
                                 && session.getPlayer().getWorld() != null
                                 && session.getPlayer().getWorld().isMultiplayer()) {
-                            maybeBroadcastRelocate(session.getPlayer(), entity, motionState);
+                            maybeBroadcastMove(session.getPlayer(), entity, motionState);
                             continue;
                         }
 
@@ -222,7 +237,7 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
         }
     }
 
-    private void maybeBroadcastRelocate(Player player, GameEntity entity, MotionState state) {
+    private void maybeBroadcastMove(Player player, GameEntity entity, MotionState state) {
         // Idle / transient states carry no meaningful position change.
         switch (state) {
             case MotionState_MOTION_NONE,
@@ -244,11 +259,25 @@ public class HandlerCombatInvocationsNotify extends PacketHandler {
         }
 
         // Everything else (walk/run/dash/climb/fly/jump/drop/land/plunge/teleport)
-        // is relocated to peers every 100ms.
+        // is broadcast to peers every 100ms, using the method selected by /smcm:
+        //  - "tp" (default): a single SceneEntityAppearNotify(VISION_REPLACE) snap.
+        //  - "normal": the official 6.7 player-location notify channel.
         long now = System.currentTimeMillis();
         if (now - entity.getLastMoveTeleportBroadcastMs() >= MOVE_THROTTLE_MS) {
             entity.setLastMoveTeleportBroadcastMs(now);
-            player.getScene().broadcastRelocateToOthers(player, entity);
+            if (useSceneEntityMoveNotify) {
+                Grasscutter.getLogger()
+                        .info(
+                                "SMM normal: broadcast player location, entity={} state={}",
+                                entity.getId(),
+                                state);
+                player.getScene()
+                        .broadcastPacket(new PacketScenePlayerLocationNotify(player.getScene()));
+                player.getWorld()
+                        .broadcastPacket(new PacketWorldPlayerLocationNotify(player.getWorld()));
+            } else {
+                player.getScene().broadcastRelocateToOthers(player, entity);
+            }
         }
     }
 

@@ -362,6 +362,8 @@ public final class PacketOpcodes {
     public static final int ReliquaryUpgradeRsp = 4892;
     public static final int SceneAudioNotify = 7517;
     public static final int SceneEntityMoveNotify = 1470;
+    public static final int SceneEntitiesMovesReq = 25259;
+    public static final int SceneEntitiesMoveCombineNotify = 1679;
     public static final int SceneEntityUpdateNotify = 1;
     public static final int ScenePlayerSoundNotify = 2089;
     public static final int SceneWeatherForcastReq = 3388;
