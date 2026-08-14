@@ -705,6 +705,13 @@ public final class PacketOpcodes {
     public static final int WorldOwnerBlossomScheduleInfoNotify = 9303;
     public static final int ActivitySelectAvatarCardReq = 28053;
     public static final int CancelCoopTaskRsp = 27585;
+    // Daily commission (DailyTask) protocol (6.7)
+    public static final int WorldOwnerDailyTaskNotify = 28030;
+    public static final int DailyTaskProgressNotify = 24983;
+    // 6.7 client sends 28078 (unknown-but-required request, single uint32) during daily-commission
+    // interaction; if unanswered the client crashes with (1,1,2). Respond with 28083 retcode=0.
+    public static final int DailyTaskUnknownReq = 28078;
+    public static final int DailyTaskUnknownRsp = 28083;
 
     public static final HashSet<Integer> BANNED_PACKETS = new HashSet<>() {
         {

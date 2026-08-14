@@ -6,14 +6,18 @@ import emu.grasscutter.data.excels.daily.DailyTaskData;
 import emu.grasscutter.game.player.BasePlayerManager;
 import emu.grasscutter.game.player.Player;
 import emu.grasscutter.game.props.ActionReason;
+import emu.grasscutter.server.packet.send.PacketDailyTaskProgressNotify;
+import emu.grasscutter.server.packet.send.PacketWorldOwnerDailyTaskNotify;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.NonNull;
 
 /**
@@ -59,10 +63,9 @@ public final class DailyCommissionManager extends BasePlayerManager {
         super(player);
     }
 
-    /** Called on player login: refresh if the 04:00 boundary was crossed, then notify. */
+    /** Called on player login: refresh if the 04:00 boundary was crossed. */
     public void onLogin() {
         this.onTick();
-        this.sendInfoNotify();
     }
 
     /** Called every server tick (via {@code Player.onTick()}): checks the 04:00 boundary. */
@@ -99,8 +102,31 @@ public final class DailyCommissionManager extends BasePlayerManager {
         var selected = new ArrayList<>(candidates.subList(0, take));
         var ids = selected.stream().map(DailyTaskData::getId).toList();
 
+        // Remove previous commissions' quests so they don't accumulate on refresh.
+        var oldIds = player.getActiveDailyTaskIds();
+        if (oldIds != null) {
+            for (var oldId : oldIds) {
+                var oldTask = GameData.getDailyTaskDataMap().get(oldId);
+                if (oldTask != null && oldTask.getQuestId() > 0) {
+                    try {
+                        var quest = player.getQuestManager().getQuestById(oldTask.getQuestId());
+                        if (quest != null) {
+                            var mainQuest = quest.getMainQuest();
+                            quest.clearProgress(true); // sends QuestDelNotify to the client
+                            player.getQuestManager().getMainQuests().remove(mainQuest.getParentQuestId());
+                            mainQuest.delete(); // remove from database
+                        }
+                    } catch (Exception e) {
+                        Grasscutter.getLogger()
+                                .debug("Failed to clear old commission quest {}", oldTask.getQuestId(), e);
+                    }
+                }
+            }
+        }
+
         player.setActiveDailyTaskIds(new ArrayList<>(ids));
         player.setDailyTaskProgress(new HashMap<>());
+        player.setFinishedDailyTaskIds(new HashSet<>());
         player.setFinishedDailyTaskCount(0);
         player.setDailyScoreRewardTaken(false);
         player.setLastCommissionResetDayKey(currentCommissionDayKey());
@@ -149,8 +175,9 @@ public final class DailyCommissionManager extends BasePlayerManager {
             }
             int current = progress.getOrDefault(taskId, 0);
             int target = task.getFinishProgress();
-            progress.put(taskId, Math.min(target, current + delta));
-            if (progress.get(taskId) >= target && target > 0) {
+            int updated = Math.min(target, current + delta);
+            progress.put(taskId, updated);
+            if (updated >= target && target > 0) {
                 this.completeTask(taskId);
             }
         }
@@ -185,18 +212,17 @@ public final class DailyCommissionManager extends BasePlayerManager {
             if (task == null) {
                 return;
             }
+            if (this.finishedIds().contains(taskId)) {
+                return; // already completed
+            }
             var progress = player.getDailyTaskProgress();
             if (progress == null) {
                 progress = new HashMap<>();
                 player.setDailyTaskProgress(progress);
             }
-            // Idempotency: a task already at its target progress counts as completed.
-            if (progress.getOrDefault(taskId, 0) >= task.getFinishProgress()
-                    && progress.getOrDefault(taskId, 0) > 0) {
-                return;
-            }
 
             progress.put(taskId, task.getFinishProgress());
+            this.finishedIds().add(taskId);
             this.grantTaskReward(task);
             player.setFinishedDailyTaskCount(player.getFinishedDailyTaskCount() + 1);
             this.save();
@@ -242,10 +268,49 @@ public final class DailyCommissionManager extends BasePlayerManager {
         return currentCommissionDayKey() != getPlayer().getLastCommissionResetDayKey();
     }
 
-    /** Headless notification: logs the active commissions (Route A would push a panel notify). */
+    /** Pushes the 4 commissions to the client panel. */
     public void sendInfoNotify() {
-        var tasks = this.getActiveTasks();
-        Grasscutter.getLogger().info("Player {} active daily commissions: {}", getPlayer().getUid(), tasks);
+        var player = getPlayer();
+        if (player.getSession() != null) {
+            player.sendPacket(new PacketWorldOwnerDailyTaskNotify(player));
+        }
+        Grasscutter.getLogger()
+                .info("Player {} active daily commissions: {}", player.getUid(), this.getActiveTasks());
+    }
+
+    /** Test-mode: push the panel with daily_task_id written at the given wire field number. */
+    public void sendInfoNotify(int dailyTaskIdField) {
+        var player = getPlayer();
+        if (player.getSession() != null) {
+            player.sendPacket(new PacketWorldOwnerDailyTaskNotify(player, dailyTaskIdField));
+        }
+        Grasscutter.getLogger()
+                .info("Player {} panel test: daily_task_id at field {}", player.getUid(), dailyTaskIdField);
+    }
+
+    /** Current progress (0..finishProgress) of a commission. */
+    public int getProgress(int taskId) {
+        var progress = getPlayer().getDailyTaskProgress();
+        return progress == null ? 0 : progress.getOrDefault(taskId, 0);
+    }
+
+    /** Whether a commission has been completed. */
+    public boolean isFinished(int taskId) {
+        return this.finishedIds().contains(taskId);
+    }
+
+    /** Lazily-initialized set of completed commission ids. */
+    private Set<Integer> finishedIds() {
+        var player = getPlayer();
+        if (player.getFinishedDailyTaskIds() == null) {
+            player.setFinishedDailyTaskIds(new HashSet<>());
+        }
+        return player.getFinishedDailyTaskIds();
+    }
+
+    /** The city id whose pool commissions are drawn from. */
+    public int getFilterCityId() {
+        return DEFAULT_CITY_ID;
     }
 
     /**

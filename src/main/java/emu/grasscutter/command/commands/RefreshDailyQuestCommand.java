@@ -8,12 +8,13 @@ import java.util.List;
 /**
  * Immediately re-dispatches a player's 4 daily commissions, bypassing the 04:00 UTC+8 boundary.
  *
- * <p>Usage: {@code /refreshdailyquest [@UID]} — without @UID the command targets the sender.
+ * <p>Usage: {@code /rdq [@UID] [fieldNumber]} — without @UID the command targets the sender. An
+ * optional numeric argument probes the daily_task_id wire field number (test mode).
  */
 @Command(
-        label = "refreshdailyquest",
-        aliases = {"rdq", "refreshdaily", "dailyrefresh"},
-        usage = "[@UID]",
+        label = "rdq",
+        aliases = {"refreshdailyquest", "refreshdaily", "dailyrefresh"},
+        usage = "[@UID] [dailyTaskIdField]",
         permission = "server.dailyquest",
         permissionTargeted = "server.dailyquest.others",
         targetRequirement = Command.TargetRequirement.ONLINE)
@@ -29,6 +30,20 @@ public final class RefreshDailyQuestCommand implements CommandHandler {
         targetPlayer.getDailyCommissionManager().resetDailyTasks(true);
 
         String name = targetPlayer.getNickname();
+        if (!args.isEmpty()) {
+            try {
+                int field = Integer.parseInt(args.get(0).trim());
+                targetPlayer.getDailyCommissionManager().sendInfoNotify(field);
+                CommandHandler.sendMessage(
+                        sender, "已为 " + name + " 刷新委托，并以字段号 " + field + " 下发 daily_task_id 测试包。");
+                return;
+            } catch (NumberFormatException e) {
+                CommandHandler.sendMessage(sender, "字段号必须是数字。");
+                return;
+            }
+        }
+
+        targetPlayer.getDailyCommissionManager().sendInfoNotify();
         CommandHandler.sendMessage(sender, "已为 " + name + " 刷新每日委托（重新派发 4 个委托，进度与计数已清零）。");
     }
 }

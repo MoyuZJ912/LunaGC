@@ -203,6 +203,7 @@ public class Player implements PlayerHook, FieldFetch {
     @Getter @Setter private int finishedDailyTaskCount;
     @Getter @Setter private boolean dailyScoreRewardTaken;
     @Getter @Setter private int lastCommissionResetDayKey;
+    @Getter @Setter private Set<Integer> finishedDailyTaskIds;
     @Getter private transient MpSettingType mpSetting = MpSettingType.MpSettingType_MP_SETTING_ENTER_AFTER_APPLY;
     @Getter private long playerGameTime = 540000;
 
@@ -229,6 +230,7 @@ public class Player implements PlayerHook, FieldFetch {
         this.dailyCommissionManager = new DailyCommissionManager(this);
         this.activeDailyTaskIds = new ArrayList<>();
         this.dailyTaskProgress = new HashMap<>();
+        this.finishedDailyTaskIds = new HashSet<>();
         this.position = new Position(GameConstants.START_POSITION);
         this.prevPos = new Position();
         this.prevPosForHome = Position.ZERO;
