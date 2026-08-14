@@ -563,6 +563,10 @@ public class Scene {
                     WatcherTriggerType.TRIGGER_BATTLE_FOR_MONSTER_DIE_OR, monsterId);
             activityManager.triggerWatcher(
                     WatcherTriggerType.TRIGGER_KILL_MONSTERS_WITHOUT_VEHICLE, monsterId);
+            // Daily commissions: advance kill-count commissions.
+            if (avatarAttacker.getPlayer().getDailyCommissionManager() != null) {
+                avatarAttacker.getPlayer().getDailyCommissionManager().onMonsterKilled();
+            }
         }
 
         this.broadcastPacket(new PacketLifeStateChangeNotify(attackerId, target, LifeState.LIFE_DEAD));

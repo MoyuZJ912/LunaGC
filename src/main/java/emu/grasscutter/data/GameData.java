@@ -15,6 +15,7 @@ import emu.grasscutter.data.excels.activity.ActivityShopData;
 import emu.grasscutter.data.excels.activity.ActivityWatcherData;
 import emu.grasscutter.data.excels.avatar.*;
 import emu.grasscutter.data.excels.codex.*;
+import emu.grasscutter.data.excels.daily.*;
 import emu.grasscutter.data.excels.dungeon.*;
 import emu.grasscutter.data.excels.giving.GivingData;
 import emu.grasscutter.data.excels.giving.GivingGroupData;
@@ -532,6 +533,19 @@ public final class GameData {
     private static final Int2ObjectMap<DropTableExcelConfigData> dropTableExcelConfigDataMap =
             new Int2ObjectOpenHashMap<>();
 
+    // Daily commission (DailyTask) resources
+    @Getter
+    private static final Int2ObjectMap<DailyTaskData> dailyTaskDataMap =
+            new Int2ObjectOpenHashMap<>();
+
+    @Getter
+    private static final Int2ObjectMap<DailyTaskLevelData> dailyTaskLevelDataMap =
+            new Int2ObjectOpenHashMap<>();
+
+    @Getter
+    private static final Int2ObjectMap<DailyTaskRewardData> dailyTaskRewardDataMap =
+            new Int2ObjectOpenHashMap<>();
+
     @Getter
     private static final Int2ObjectMap<MonsterMapping> monsterMappingMap =
             new Int2ObjectOpenHashMap<>();
@@ -676,6 +690,17 @@ public final class GameData {
         }
 
         return map;
+    }
+
+    /** Returns the daily-commission level band covering the given player level, or null. */
+    public static DailyTaskLevelData getDailyTaskLevelDataByPlayerLevel(int playerLevel) {
+        for (var levelData : dailyTaskLevelDataMap.values()) {
+            if (playerLevel >= levelData.getMinPlayerLevel()
+                    && playerLevel <= levelData.getMaxPlayerLevel()) {
+                return levelData;
+            }
+        }
+        return null;
     }
 
     public static int getWeaponExpRequired(int rankLevel, int level) {

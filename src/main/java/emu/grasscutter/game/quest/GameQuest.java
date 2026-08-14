@@ -269,6 +269,11 @@ public class GameQuest {
                 .getGainItems()
                 .forEach(item -> this.getOwner().getInventory().addItem(item, ActionReason.QuestItem));
 
+        // Daily commissions: complete any commission linked to this quest.
+        if (this.getOwner().getDailyCommissionManager() != null) {
+            this.getOwner().getDailyCommissionManager().onQuestFinish(this.subQuestId);
+        }
+
         this.save();
         Grasscutter.getLogger().debug("Quest {} was completed.", subQuestId);
     }

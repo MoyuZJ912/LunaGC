@@ -13,6 +13,7 @@ import emu.grasscutter.game.activity.ActivityManager;
 import emu.grasscutter.game.avatar.*;
 import emu.grasscutter.game.battlepass.BattlePassManager;
 import emu.grasscutter.game.city.CityInfoData;
+import emu.grasscutter.game.dailycommission.DailyCommissionManager;
 import emu.grasscutter.game.entity.GameEntity;
 import emu.grasscutter.game.expedition.ExpeditionInfo;
 import emu.grasscutter.game.friends.*;
@@ -196,6 +197,12 @@ public class Player implements PlayerHook, FieldFetch {
     @Getter @Setter private int nextResinRefresh;
     @Getter @Setter private int resinBuyCount;
     @Getter @Setter private int lastDailyReset;
+    @Getter @Setter private transient DailyCommissionManager dailyCommissionManager;
+    @Getter @Setter private List<Integer> activeDailyTaskIds;
+    @Getter @Setter private Map<Integer, Integer> dailyTaskProgress;
+    @Getter @Setter private int finishedDailyTaskCount;
+    @Getter @Setter private boolean dailyScoreRewardTaken;
+    @Getter @Setter private int lastCommissionResetDayKey;
     @Getter private transient MpSettingType mpSetting = MpSettingType.MpSettingType_MP_SETTING_ENTER_AFTER_APPLY;
     @Getter private long playerGameTime = 540000;
 
@@ -219,6 +226,9 @@ public class Player implements PlayerHook, FieldFetch {
         this.deforestationManager = new DeforestationManager(this);
         this.questManager = new QuestManager(this);
         this.buffManager = new PlayerBuffManager(this);
+        this.dailyCommissionManager = new DailyCommissionManager(this);
+        this.activeDailyTaskIds = new ArrayList<>();
+        this.dailyTaskProgress = new HashMap<>();
         this.position = new Position(GameConstants.START_POSITION);
         this.prevPos = new Position();
         this.prevPosForHome = Position.ZERO;
@@ -1253,6 +1263,7 @@ public class Player implements PlayerHook, FieldFetch {
         this.getHome().updateHourlyResources(this);
 
         this.getQuestManager().onTick();
+        this.getDailyCommissionManager().onTick();
     }
 
     private synchronized void doDailyReset() {
@@ -1300,6 +1311,9 @@ public class Player implements PlayerHook, FieldFetch {
 
         if (this.getTeamManager() == null) {
             this.teamManager = new TeamManager(this);
+        }
+        if (this.getDailyCommissionManager() == null) {
+            this.dailyCommissionManager = new DailyCommissionManager(this);
         }
         if (this.getCodex() == null) {
             this.codex = new PlayerCodex(this);
@@ -1351,6 +1365,8 @@ public class Player implements PlayerHook, FieldFetch {
         this.doDailyReset();
 
         getQuestManager().onLogin();
+
+        this.getDailyCommissionManager().onLogin();
 
         session.send(new PacketPlayerDataNotify(this));
         session.send(new PacketStoreWeightLimitNotify());
