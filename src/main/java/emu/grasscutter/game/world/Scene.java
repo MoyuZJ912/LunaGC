@@ -436,7 +436,16 @@ public class Scene {
                                         !(gameEntity instanceof Rebornable rebornable) || !rebornable.isInCD())
                         .toList();
 
-        player.sendPacket(new PacketSceneEntityAppearNotify(entities, VisionType.VisionType_VISION_MEET));
+        // The 6.7 client crashes (1,1,2 / ArgumentOutOfRangeException: index) when one
+        // VISION_MEET notify contains too many entities at once (e.g. Wolvendom has 1100+).
+        // Chunk the notify the same way addEntities does (100 entities per packet).
+        final int chunkSize = 100;
+        for (int i = 0; i < entities.size(); i += chunkSize) {
+            int end = Math.min(i + chunkSize, entities.size());
+            player.sendPacket(
+                    new PacketSceneEntityAppearNotify(
+                            entities.subList(i, end), VisionType.VisionType_VISION_MEET));
+        }
     }
 
     public void handleAttack(AttackResult result) {
