@@ -832,6 +832,14 @@ public class SceneScriptManager {
 
     public void spawnMonstersByConfigId(SceneGroup group, int configId, int delayTime) {
         // TODO delay
+        var monsterData = group.monsters == null ? null : group.monsters.get(configId);
+        Grasscutter.getLogger()
+                .info(
+                        "[LUA] spawnMonstersByConfigId group={} config={} monsterId={} delay={}",
+                        group != null ? group.id : -1,
+                        configId,
+                        monsterData != null ? monsterData.monster_id : -1,
+                        delayTime);
         var entity = scene.getEntityByConfigId(configId, group.id);
         if (entity != null && entity.getGroupId() == group.id) {
             Grasscutter.getLogger()
@@ -1080,6 +1088,63 @@ public class SceneScriptManager {
         EntityMonster entity = new EntityMonster(getScene(), data, monster.pos, monster.rot, level);
         entity.setGroupId(groupId);
         entity.setBlockId(blockId);
+        entity.setConfigId(monster.config_id);
+        entity.setPoseId(monster.pose_id);
+        entity.setMetaMonster(monster);
+
+        this.getScriptMonsterSpawnService()
+                .onMonsterCreatedListener
+                .forEach(action -> action.onNotify(entity));
+
+        return entity;
+    }
+
+    /**
+     * Creates a monster from the group's monster config but overrides its spawn
+     * position/rotation. Used by Lua's ScriptLib.CreateMonsterByConfigIdByPos.
+     */
+    public EntityMonster createMonsterByConfigIdByPos(
+            SceneGroup group, int configId, Position pos, Position rot) {
+        if (group == null) {
+            Grasscutter.getLogger().warn("CreateMonsterByConfigIdByPos called with null group");
+            return null;
+        }
+
+        if (group.monsters == null) {
+            Grasscutter.getLogger()
+                    .warn("CreateMonsterByConfigIdByPos could not find monster table in group {}", group.id);
+            return null;
+        }
+
+        SceneMonster monster = group.monsters.get(configId);
+        if (monster == null) {
+            Grasscutter.getLogger()
+                    .warn(
+                            "CreateMonsterByConfigIdByPos could not find monster config {} in group {}",
+                            configId,
+                            group.id);
+            return null;
+        }
+
+        var data = GameData.getMonsterDataMap().get(monster.monster_id);
+        if (data == null) {
+            Grasscutter.getLogger()
+                    .warn(
+                            "CreateMonsterByConfigIdByPos could not find MonsterData for monsterId {} in group {}, config {}",
+                            monster.monster_id,
+                            group.id,
+                            configId);
+            return null;
+        }
+
+        Position spawnPos = pos != null ? pos : monster.pos;
+        Position spawnRot = rot != null ? rot : monster.rot;
+
+        int level = getScene().getLevelForMonster(monster.config_id, monster.level);
+
+        EntityMonster entity = new EntityMonster(getScene(), data, spawnPos, spawnRot, level);
+        entity.setGroupId(group.id);
+        entity.setBlockId(group.block_id);
         entity.setConfigId(monster.config_id);
         entity.setPoseId(monster.pose_id);
         entity.setMetaMonster(monster);

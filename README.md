@@ -4,6 +4,15 @@
 
 This fork is based on [girluh/LunaGC](https://github.com/girluh/LunaGC) (`6.7.0` branch) with the following additions for a private-server deployment:
 
+### Daily commissions & (1,1,2) crash fixes (2026-08-15)
+- Daily commissions are fully playable end-to-end: dispatch -> scene-group load -> kill counting -> completion -> rewards -> client panel refresh.
+- Fixed kill counting: `GameEntity.damage()` now forwards `killerId`, so normal attacks, skills, summons and elemental-reaction kills all advance commission progress.
+- Client panel updates: progress changes send `DailyTaskProgressNotify`, and completing a task resends `WorldOwnerDailyTaskNotify` so the finished count refreshes immediately.
+- Isolated Lua environments: every group script now evaluates in its own `Globals`, preventing cross-group global leakage (`attempt to index ? (a nil value)`) that could also destabilize the client.
+- Added the missing `ScriptLib.CreateMonsterByConfigIdByPos` Lua API and its scene-spawn helper.
+- Commission groups are now streamed by distance (load within 500m, unload beyond 1200m) instead of loading all four at once; this avoids stacking distant commission entities onto a scene transition and reduces (1,1,2) crash risk.
+- Crash diagnostics: `tools/monitor_client_crash.ps1` watches the client output log for fatal .NET exceptions and automatically captures recent server logs, GC, jstack and port state into `crash-diagnostics/`; `tools/capture_crash_diag.ps1` can be run manually.
+
 ### Account & authentication
 - Password login locks the entered password (BCrypt-hashed) on first login, covering both auto-created accounts and legacy accounts with an empty password. `Account.verifyPassword` now accepts both BCrypt-hashed and legacy plaintext passwords.
 - Combo-login and stoken verification are lenient: if the stored session key differs (e.g. the client cached a token from another session/server), the client's token is adopted so login succeeds instead of failing with a session-key error.

@@ -9,7 +9,7 @@ import emu.grasscutter.scripts.constants.*;
 import emu.grasscutter.scripts.data.SceneMeta;
 import emu.grasscutter.scripts.serializer.*;
 import emu.grasscutter.utils.FileUtils;
-import java.io.IOException;
+import java.io.*;
 import java.lang.ref.SoftReference;
 import java.nio.file.*;
 import java.util.*;
@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.script.*;
 import lombok.Getter;
 import org.luaj.vm2.*;
-import org.luaj.vm2.lib.OneArgFunction;
+import org.luaj.vm2.lib.*;
 import org.luaj.vm2.lib.jse.CoerceJavaToLua;
 import org.luaj.vm2.script.*;
 
@@ -33,6 +33,8 @@ public class ScriptLoader {
 
     private static Map<String, SoftReference<CompiledScript>> scriptsCache =
             new ConcurrentHashMap<>();
+    /** The shared globals used as a template for per-bindings Lua environments. */
+    private static Globals baseGlobals;
     /** sceneId - SceneMeta */
     private static Map<Integer, SoftReference<SceneMeta>> sceneMetaCache = new ConcurrentHashMap<>();
 
@@ -54,6 +56,7 @@ public class ScriptLoader {
         var ctx = new LuajContext(true, false);
         ctx.setBindings(engine.createBindings(), ScriptContext.ENGINE_SCOPE);
         engine.setContext(ctx);
+        ScriptLoader.baseGlobals = ctx.globals;
 
         // Set the 'require' function handler.
         ctx.globals.set("require", new RequireFunction());
@@ -233,50 +236,40 @@ public class ScriptLoader {
         }
 
         try {
-            CompiledScript script;
-            if (Configuration.FAST_REQUIRE) {
-                // Attempt to load the script.
-                var scriptPath = useAbsPath ? Paths.get(path) : FileUtils.getScriptPath(path);
-                if (!Files.exists(scriptPath)) {
-                    Grasscutter.getLogger().error("Could not find script at path {}", path);
-                    return null;
-                }
+            // Load the script sources. When fastRequire is disabled, referenced
+            // Common scripts are inlined before compilation (official 'works better'
+            // mode).
+            var sources = ScriptLoader.readScript(path, useAbsPath);
+            if (sources == null) return null;
 
-                // Compile the script from the file.
-                var source = Files.newBufferedReader(scriptPath);
-                script = ScriptLoader.getEngine().compile(source);
-            } else {
-                // Load the script sources.
-                var sources = ScriptLoader.readScript(path, useAbsPath);
-                if (sources == null) return null;
-
-                // Check to see if the script references other scripts.
-                if (sources.contains("require")) {
-                    var lines = sources.split("\n");
-                    var output = new StringBuilder();
-                    for (var line : lines) {
-                        // Skip non-require lines.
-                        if (!line.startsWith("require")) {
-                            output.append(line).append("\n");
-                            continue;
-                        }
-
-                        // Extract the script name.
-                        var scriptName = line.substring(9, line.length() - 1);
-                        // Resolve the script path.
-                        var scriptPath = "Common/" + scriptName + ".lua";
-                        var scriptSource = ScriptLoader.readScript(scriptPath, useAbsPath);
-                        if (scriptSource == null) continue;
-
-                        // Append the script source.
-                        output.append(scriptSource).append("\n");
+            if (!Configuration.FAST_REQUIRE && sources.contains("require")) {
+                var lines = sources.split("\n");
+                var output = new StringBuilder();
+                for (var line : lines) {
+                    // Skip non-require lines.
+                    if (!line.startsWith("require")) {
+                        output.append(line).append("\n");
+                        continue;
                     }
-                    sources = output.toString();
-                }
 
-                // Compile the script & cache it in memory.
-                script = ScriptLoader.getEngine().compile(sources);
+                    // Extract the script name.
+                    var scriptName = line.substring(9, line.length() - 1);
+                    // Resolve the script path.
+                    var scriptPath = "Common/" + scriptName + ".lua";
+                    var scriptSource = ScriptLoader.readScript(scriptPath, useAbsPath);
+                    if (scriptSource == null) continue;
+
+                    // Append the script source.
+                    output.append(scriptSource).append("\n");
+                }
+                sources = output.toString();
             }
+
+            // Compile a prototype. The actual Lua closure is created later with a
+            // dedicated Globals environment for the evaluating bindings, so globals
+            // from different groups can never leak into each other.
+            var prototype = ScriptLoader.baseGlobals.compilePrototype(new StringReader(sources), path);
+            CompiledScript script = new IsolatedCompiledScript(prototype);
 
             // Cache the script.
             ScriptLoader.scriptsCache.put(path, new SoftReference<>(script));
@@ -285,6 +278,101 @@ public class ScriptLoader {
             Grasscutter.getLogger()
                     .error("Loading script {} failed! - {}", path, e.getLocalizedMessage());
             return null;
+        }
+    }
+
+    /**
+     * Creates a dedicated Lua environment for one {@link Bindings} instance.
+     *
+     * <p>The stock LuaJ script engine reuses a single {@link Globals} object for every
+     * compiled script and simply swaps its metatable to the latest bindings. This leaks
+     * globals (such as {@code gadgets} / {@code monsters} / {@code defs}) between group
+     * scripts evaluated at different times, producing nondeterministic
+     * {@code attempt to index ? (a nil value)} failures. Each closure compiled through
+     * {@link #getScript(String, boolean)} is therefore executed against its own copy of
+     * the base globals, with a metatable permanently bound to its own bindings.
+     */
+    private static Globals createScriptGlobals(Bindings bindings) {
+        var globals = new Globals();
+
+        // Copy the base library globals (math, string, ScriptLib, EventType, ...).
+        for (var key : ScriptLoader.baseGlobals.keys()) {
+            globals.rawset(key, ScriptLoader.baseGlobals.rawget(key));
+        }
+        // _G must point at the new environment, not at the template.
+        globals.rawset("_G", globals);
+        globals.setmetatable(new BindingsMetatable(bindings));
+
+        return globals;
+    }
+
+    private static final class BindingsMetatable extends LuaTable {
+        private BindingsMetatable(Bindings bindings) {
+            this.rawset(
+                    LuaValue.INDEX,
+                    new TwoArgFunction() {
+                        @Override
+                        public LuaValue call(LuaValue table, LuaValue key) {
+                            if (!key.isstring()) return LuaValue.NIL;
+                            var value = bindings.get(key.tojstring());
+                            if (value == null) return LuaValue.NIL;
+                            if (value instanceof LuaValue luaValue) return luaValue;
+                            return CoerceJavaToLua.coerce(value);
+                        }
+                    });
+            this.rawset(
+                    LuaValue.NEWINDEX,
+                    new ThreeArgFunction() {
+                        @Override
+                        public LuaValue call(LuaValue table, LuaValue key, LuaValue value) {
+                            if (!key.isstring()) return LuaValue.NIL;
+                            var keyString = key.tojstring();
+                            if (value.isnil()) {
+                                bindings.remove(keyString);
+                            } else {
+                                bindings.put(keyString, value);
+                            }
+                            return LuaValue.NONE;
+                        }
+                    });
+        }
+    }
+
+    /**
+     * A compiled script whose execution is isolated to the bindings passed to
+     * {@link #eval(Bindings)}. The prototype is shared and cached, but the Lua closure is
+     * recreated for every evaluation with a fresh globals environment.
+     */
+    private static final class IsolatedCompiledScript extends CompiledScript {
+        private final Prototype prototype;
+
+        private IsolatedCompiledScript(Prototype prototype) {
+            this.prototype = prototype;
+        }
+
+        @Override
+        public Object eval(Bindings bindings) throws ScriptException {
+            try {
+                var closure = new LuaClosure(this.prototype, createScriptGlobals(bindings));
+                closure.invoke(LuaValue.NONE);
+                return null;
+            } catch (LuaError error) {
+                throw new ScriptException(error);
+            }
+        }
+
+        @Override
+        public Object eval(ScriptContext context) throws ScriptException {
+            var bindings = context.getBindings(ScriptContext.ENGINE_SCOPE);
+            if (bindings == null) {
+                bindings = ScriptLoader.getEngine().getBindings(ScriptContext.ENGINE_SCOPE);
+            }
+            return this.eval(bindings);
+        }
+
+        @Override
+        public ScriptEngine getEngine() {
+            return ScriptLoader.getEngine();
         }
     }
 

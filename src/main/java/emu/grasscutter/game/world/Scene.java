@@ -555,17 +555,32 @@ public class Scene {
             }
         }
 
-        // Activity watcher: notify the activity system that a monster died.
-        if (target instanceof EntityMonster monster && attacker instanceof EntityAvatar avatarAttacker) {
-            var monsterId = String.valueOf(monster.getMonsterData().getId());
-            var activityManager = avatarAttacker.getPlayer().getActivityManager();
-            activityManager.triggerWatcher(
-                    WatcherTriggerType.TRIGGER_BATTLE_FOR_MONSTER_DIE_OR, monsterId);
-            activityManager.triggerWatcher(
-                    WatcherTriggerType.TRIGGER_KILL_MONSTERS_WITHOUT_VEHICLE, monsterId);
-            // Daily commissions: advance kill-count commissions.
-            if (avatarAttacker.getPlayer().getDailyCommissionManager() != null) {
-                avatarAttacker.getPlayer().getDailyCommissionManager().onMonsterKilled();
+        // Activity watcher + daily commissions: only count player-controlled kills.
+        // Resolve the true owner so avatar-owned gadgets/projectiles (skills, elemental
+        // reactions) also count — otherwise only direct normal-attack kills register.
+        if (target instanceof EntityMonster monster) {
+            GameEntity trueAttacker = attacker != null ? attacker.getTrueOwner() : null;
+            Grasscutter.getLogger()
+                    .info(
+                            "[DailyCommission] killEntity: monster={} attackerId={} attacker={} trueAttacker={}",
+                            monster.getMonsterData().getId(),
+                            attackerId,
+                            attacker == null ? "null" : attacker.getClass().getSimpleName(),
+                            trueAttacker == null ? "null" : trueAttacker.getClass().getSimpleName());
+            if (trueAttacker instanceof EntityAvatar avatarAttacker) {
+                var monsterId = String.valueOf(monster.getMonsterData().getId());
+                var activityManager = avatarAttacker.getPlayer().getActivityManager();
+                activityManager.triggerWatcher(
+                        WatcherTriggerType.TRIGGER_BATTLE_FOR_MONSTER_DIE_OR, monsterId);
+                activityManager.triggerWatcher(
+                        WatcherTriggerType.TRIGGER_KILL_MONSTERS_WITHOUT_VEHICLE, monsterId);
+                // Daily commissions: advance kill-count commissions.
+                if (avatarAttacker.getPlayer().getDailyCommissionManager() != null) {
+                    avatarAttacker
+                            .getPlayer()
+                            .getDailyCommissionManager()
+                            .onMonsterKilled(monster.getGroupId(), monster.getConfigId());
+                }
             }
         }
 

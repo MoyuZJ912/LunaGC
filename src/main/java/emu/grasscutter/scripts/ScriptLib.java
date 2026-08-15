@@ -68,6 +68,17 @@ public class ScriptLib {
         return sb.toString();
     }
 
+    private Position luaTableToPositionOrNull(LuaTable table) {
+        if (table == null || table.isnil()) {
+            return null;
+        }
+
+        return new Position(
+                table.get("x").tofloat(),
+                table.get("y").tofloat(),
+                table.get("z").tofloat());
+    }
+
     public void setCurrentGroup(SceneGroup currentGroup) {
         this.currentGroup.set(currentGroup);
     }
@@ -299,7 +310,14 @@ public class ScriptLib {
     }
 
     public int BeginCameraSceneLook(LuaTable sceneLookParams) {
-        logger.warn("[LUA] Call unimplemented BeginCameraSceneLook with {}", printTable(sceneLookParams));
+        var group = this.currentGroup.getIfExists();
+        var params = this.callParams.getIfExists();
+        logger.warn(
+                "[LUA] Call unimplemented BeginCameraSceneLook group={} event={} source={} with {}",
+                group != null ? group.id : -1,
+                params != null ? params.type : -1,
+                params != null ? params.getEventSource() : null,
+                printTable(sceneLookParams));
 
         return 0;
     }
@@ -372,6 +390,16 @@ public class ScriptLib {
     public boolean CheckIsInMpMode() {
         logger.debug("[LUA] Call CheckIsInMpMode");
         return this.getSceneScriptManager().getScene().getWorld().isMultiplayer();
+    }
+
+    /**
+     * 判断指定 group 组内指定 configId 的实体（gadget/monster）当前是否存在于场景中。
+     * groupId 为 0 时忽略组过滤，仅按 configId 判断。
+     */
+    public boolean CheckIsInGroup(int groupId, int configId) {
+        logger.debug("[LUA] Call CheckIsInGroup with {}, {}", groupId, configId);
+        return getSceneScriptManager().getScene().getEntities().values().stream()
+                .anyMatch(e -> (groupId == 0 || e.getGroupId() == groupId) && e.getConfigId() == configId);
     }
 
     public int CheckRemainGadgetCountByGroupId(LuaTable table) {
@@ -459,6 +487,34 @@ public class ScriptLib {
         }
 
         getSceneScriptManager().spawnMonstersByConfigId(getCurrentGroup().get(), configId, delayTime);
+        return 0;
+    }
+
+    public int CreateMonsterByConfigIdByPos(int configId, LuaTable bornPos, LuaTable face) {
+        logger.debug("[LUA] Call CreateMonsterByConfigIdByPos with {}, {}, {}", configId, bornPos, face);
+
+        var currentGroup = this.currentGroup.getIfExists();
+        if (currentGroup == null) {
+            logger.warn("[LUA] CreateMonsterByConfigIdByPos failed: no current group for config {}", configId);
+            return 1;
+        }
+
+        Position pos = luaTableToPositionOrNull(bornPos);
+        Position rot = luaTableToPositionOrNull(face);
+
+        EntityMonster entity =
+                this.getSceneScriptManager()
+                        .createMonsterByConfigIdByPos(currentGroup, configId, pos, rot);
+
+        if (entity == null) {
+            logger.warn(
+                    "[LUA] CreateMonsterByConfigIdByPos failed for group {}, config {}",
+                    currentGroup.id,
+                    configId);
+            return 2;
+        }
+
+        this.getSceneScriptManager().addEntity(entity);
         return 0;
     }
 

@@ -36,7 +36,10 @@ public class PacketWorldOwnerDailyTaskNotify extends BasePacket {
         for (var task : manager.getActiveTasks()) {
             byte[] info =
                     encodeDailyTaskInfo(
-                            task, manager.getProgress(task.getId()), manager.isFinished(task.getId()));
+                            task,
+                            manager.getRewardId(task.getTaskRewardId()),
+                            manager.getProgress(task.getId()),
+                            manager.isFinished(task.getId()));
             writeBytesField(data, F_TASK_LIST, info);
         }
         writeVarintField(data, F_FILTER_CITY_ID, manager.getFilterCityId());
@@ -73,11 +76,11 @@ public class PacketWorldOwnerDailyTaskNotify extends BasePacket {
     }
 
     /** Encodes one DailyTaskInfo message. */
-    static byte[] encodeDailyTaskInfo(DailyTaskData task, int progress, boolean finished) {
+    static byte[] encodeDailyTaskInfo(DailyTaskData task, int rewardId, int progress, boolean finished) {
         var out = new ByteArrayOutputStream();
         writeVarintField(out, F_DAILY_TASK_ID, task.getId());
         writeVarintField(out, F_PROGRESS, progress);
-        writeVarintField(out, F_REWARD_ID, task.getTaskRewardId());
+        writeVarintField(out, F_REWARD_ID, rewardId);
         writeVarintField(out, F_FINISH_PROGRESS, task.getFinishProgress());
         writeVarintField(out, F_IS_FINISHED, finished ? 1 : 0);
         return out.toByteArray();

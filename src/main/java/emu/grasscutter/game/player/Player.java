@@ -204,6 +204,12 @@ public class Player implements PlayerHook, FieldFetch {
     @Getter @Setter private boolean dailyScoreRewardTaken;
     @Getter @Setter private int lastCommissionResetDayKey;
     @Getter @Setter private Set<Integer> finishedDailyTaskIds;
+    /**
+     * Monsters already legitimately defeated for today's daily commissions, keyed by
+     * {@code (groupId << 32) | configId}. Prevents a re-created monster (teleport/relog/
+     * restart) from counting toward the same commission twice.
+     */
+    @Getter @Setter private Set<Long> defeatedDailyMonsterKeys;
     @Getter private transient MpSettingType mpSetting = MpSettingType.MpSettingType_MP_SETTING_ENTER_AFTER_APPLY;
     @Getter private long playerGameTime = 540000;
 
@@ -231,6 +237,7 @@ public class Player implements PlayerHook, FieldFetch {
         this.activeDailyTaskIds = new ArrayList<>();
         this.dailyTaskProgress = new HashMap<>();
         this.finishedDailyTaskIds = new HashSet<>();
+        this.defeatedDailyMonsterKeys = new HashSet<>();
         this.position = new Position(GameConstants.START_POSITION);
         this.prevPos = new Position();
         this.prevPosForHome = Position.ZERO;
@@ -1266,6 +1273,12 @@ public class Player implements PlayerHook, FieldFetch {
 
         this.getQuestManager().onTick();
         this.getDailyCommissionManager().onTick();
+
+        // Stream daily-commission scene groups by distance (500m load / 1200m unload).
+        // Do not touch scene groups while the client is still entering a scene.
+        if (this.getScene() != null && this.getSceneLoadState() == SceneLoadState.LOADED) {
+            this.getDailyCommissionManager().updateActiveGroups(this.getScene());
+        }
     }
 
     private synchronized void doDailyReset() {

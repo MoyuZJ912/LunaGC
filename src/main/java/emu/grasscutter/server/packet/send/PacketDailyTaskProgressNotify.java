@@ -14,11 +14,11 @@ public class PacketDailyTaskProgressNotify extends BasePacket {
 
     static final int F_INFO = 3; // DailyTaskInfo info
 
-    public PacketDailyTaskProgressNotify(DailyTaskData task, int progress, boolean finished) {
+    public PacketDailyTaskProgressNotify(DailyTaskData task, int rewardId, int progress, boolean finished) {
         super(PacketOpcodes.DailyTaskProgressNotify);
 
         var data = new ByteArrayOutputStream();
-        byte[] info = PacketWorldOwnerDailyTaskNotify.encodeDailyTaskInfo(task, progress, finished);
+        byte[] info = PacketWorldOwnerDailyTaskNotify.encodeDailyTaskInfo(task, rewardId, progress, finished);
         PacketWorldOwnerDailyTaskNotify.writeBytesField(data, F_INFO, info);
 
         this.setData(data.toByteArray());
