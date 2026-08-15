@@ -42,8 +42,6 @@ This fork is based on [girluh/LunaGC](https://github.com/girluh/LunaGC) (`6.7.0`
 - Dispatch `RegionHandler` resolves the game-server address and dispatch domain per request (configured address → request host → bind address), so clients on localhost / LAN / public IP / domain can all join.
 - The console input loop returns cleanly when stdin closes (EOF) instead of spinning and flooding the log.
 
-**Note:** this repository contains no credentials, keys, IP addresses or other server secrets.
-
 ## Note from the maintainer
 Might update to latest occasionally, depends on how I'm feeling and my situation. Of course, I post the protocol buffer definitions on [GitLab](https://gitlab.com/kitkat-multiverse/genshin-protocol) and translations. Contact me at my [Discord](https://discord.gg/5Rfyjrt5aB)
 
