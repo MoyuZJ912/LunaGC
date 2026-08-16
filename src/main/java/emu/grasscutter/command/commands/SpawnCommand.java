@@ -12,6 +12,7 @@ import emu.grasscutter.game.entity.*;
 import emu.grasscutter.game.player.Player;
 import emu.grasscutter.game.props.*;
 import emu.grasscutter.game.world.*;
+import emu.grasscutter.scripts.data.SceneGroup;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
@@ -99,7 +100,8 @@ public final class SpawnCommand implements CommandHandler {
 
         param.scene = targetPlayer.getScene();
 
-        if (param.scene.getEntities().size() + param.amount > GAME_OPTIONS.sceneEntityLimit) {
+        if (GAME_OPTIONS.isPreventEntityError
+                && param.scene.getEntities().size() + param.amount > GAME_OPTIONS.sceneEntityLimit) {
             param.amount =
                     Math.max(
                             Math.min(
@@ -153,10 +155,35 @@ public final class SpawnCommand implements CommandHandler {
         if (gadgetData.getType() == EntityType.Vehicle) {
             entity = new EntityVehicle(param.scene, targetPlayer, param.id, 0, pos, param.rot);
         } else {
-            entity = new EntityGadget(param.scene, param.id, pos, param.rot);
-            if (param.state != -1) {
-                ((EntityGadget) entity).setState(param.state);
+            EntityGadget gadget = new EntityGadget(param.scene, param.id, pos, param.rot);
+
+            // When a group/config is supplied, attach the real SceneGadget from the map
+            // script. This makes the spawned chest/gadget keep its map identity (name,
+            // drop config, interaction) instead of being a bare unnamed gadget.
+            if (param.groupId != -1 && param.configId != -1) {
+                SceneGroup group = SceneGroup.of(param.groupId).load(param.scene.getId());
+                if (group != null && group.gadgets != null) {
+                    var sceneGadget = group.gadgets.get(param.configId);
+                    if (sceneGadget != null) {
+                        gadget.setMetaGadget(sceneGadget);
+                        gadget.setGroupId(group.id);
+                        gadget.setBlockId(param.blockId != -1 ? param.blockId : group.block_id);
+                        gadget.setConfigId(sceneGadget.config_id);
+                        if (param.state == -1) {
+                            gadget.setState(sceneGadget.state);
+                        }
+                    }
+                }
             }
+
+            // Build the interaction content (Chest/Worktop/GatherPoint etc.) so the
+            // spawned gadget is actually usable.
+            gadget.buildContent();
+
+            if (param.state != -1) {
+                gadget.setState(param.state);
+            }
+            entity = gadget;
         }
         return entity;
     }

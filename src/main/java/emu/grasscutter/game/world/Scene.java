@@ -51,6 +51,7 @@ import javax.annotation.Nullable;
 import lombok.*;
 
 import static emu.grasscutter.GameConstants.ENTITY_ID_BIT_SHIFT;
+import static emu.grasscutter.config.Configuration.GAME_OPTIONS;
 
 public class Scene {
     @Getter private final World world;
@@ -62,6 +63,20 @@ public class Scene {
     @Getter private final Set<SpawnDataEntry> deadSpawnedEntities;
     @Getter private final Set<SceneBlock> loadedBlocks;
     @Getter private final Set<SceneGroup> loadedGroups;
+    /** Group ids that have been explicitly registered on the client via GroupSuiteNotify. */
+    @Getter private final Set<Integer> clientKnownGroups;
+    /** When each group was loaded (epoch ms), used to avoid unloading freshly-loaded groups too early. */
+    private final Map<Integer, Long> groupLoadTimes;
+    /** Grace period after a group is loaded before it may be unloaded again. */
+    private static final long GROUP_UNLOAD_GRACE_PERIOD_MS = 5000;
+    /** Maximum distance (metres) from a player for loading script groups. */
+    private static final int MAX_ENTITY_LOAD_RANGE = 500;
+    /**
+     * Deduplication keys for world entities. Official group config ids are unique inside
+     * a group; duplicate (group, config, class) entities corrupt the client's scene-node
+     * arrays and are the actual trigger behind "node cnt out of index".
+     */
+    private final Set<String> entityIdentityKeys;
     @Getter private final BlossomManager blossomManager;
     private final HashSet<Integer> unlockedForces;
     private final long startWorldTime;
@@ -102,6 +117,9 @@ public class Scene {
         this.deadSpawnedEntities = ConcurrentHashMap.newKeySet();
         this.loadedBlocks = ConcurrentHashMap.newKeySet();
         this.loadedGroups = ConcurrentHashMap.newKeySet();
+        this.clientKnownGroups = ConcurrentHashMap.newKeySet();
+        this.groupLoadTimes = new ConcurrentHashMap<>();
+        this.entityIdentityKeys = ConcurrentHashMap.newKeySet();
         this.loadedGridBlocks = new HashSet<>();
         this.npcBornEntrySet = ConcurrentHashMap.newKeySet();
         this.scriptManager = new SceneScriptManager(this);
@@ -310,19 +328,88 @@ public class Scene {
                 .forEach(Avatar::sendSkillExtraChargeMap);
     }
 
-    private void addEntityDirectly(GameEntity entity) {
+    private synchronized boolean addEntityDirectly(GameEntity entity) {
+        if (entity == null) return false;
+
+        // In prevention mode, reject duplicate world entities for the same
+        // (class, group, config). Repeated group refreshes have been observed
+        // creating 4-6 copies of the same gadget/monster; those duplicate nodes
+        // are what ultimately overflow the client's scene-node array.
+        String identityKey = entityIdentityKey(entity);
+        if (identityKey != null && !this.entityIdentityKeys.add(identityKey)) {
+            Grasscutter.getLogger()
+                    .warn(
+                            "[Scene] duplicate entity skipped id={} class={} group={} config={}",
+                            entity.getId(),
+                            entity.getClass().getSimpleName(),
+                            entity.getGroupId(),
+                            entity.getConfigId());
+            return false;
+        }
+
+        if (!canAddEntity(entity)) {
+            if (identityKey != null) {
+                this.entityIdentityKeys.remove(identityKey);
+            }
+            Grasscutter.getLogger()
+                    .debug(
+                            "Scene {} entity limit reached, skipped {} (id={})",
+                            getId(),
+                            entity.getClass().getSimpleName(),
+                            entity.getId());
+            return false;
+        }
+
+        Grasscutter.getLogger()
+                .info(
+                        "[Scene] addEntityDirectly id={} class={} group={} config={}",
+                        entity.getId(),
+                        entity.getClass().getSimpleName(),
+                        entity.getGroupId(),
+                        entity.getConfigId());
         getEntities().put(entity.getId(), entity);
         entity.onCreate();
+        return true;
+    }
+
+    private String entityIdentityKey(GameEntity entity) {
+        if (!GAME_OPTIONS.isPreventEntityError) return null;
+        if (entity.getGroupId() == 0 && entity.getConfigId() == 0) return null;
+        if (!(entity instanceof EntityMonster
+                || entity instanceof EntityGadget
+                || entity instanceof EntityNPC)) return null;
+        return entity.getClass().getSimpleName() + ":" + entity.getGroupId() + ":" + entity.getConfigId();
+    }
+
+    /**
+     * Hard scene-entity cap. Non-essential world entities are not added once the scene
+     * reaches the configured limit; this prevents unbounded entity growth and the client
+     * (1,1,2) crashes caused by excessively large scene syncs.
+     */
+    private boolean canAddEntity(GameEntity entity) {
+        // Upstream-compatible mode: no entity cap at all.
+        if (!GAME_OPTIONS.isPreventEntityError) return true;
+
+        if (getEntities().size() < GAME_OPTIONS.sceneEntityLimit) return true;
+
+        // Always allow core player/scene entities so gameplay doesn't break at the cap.
+        return entity instanceof EntityAvatar
+                || entity instanceof EntityTeam
+                || entity instanceof EntityScene
+                || entity instanceof EntityWeapon
+                || entity instanceof EntityClientGadget;
     }
 
     public synchronized void addEntity(GameEntity entity) {
-        this.addEntityDirectly(entity);
-        this.broadcastPacket(new PacketSceneEntityAppearNotify(entity));
+        if (this.addEntityDirectly(entity)) {
+            this.broadcastPacket(new PacketSceneEntityAppearNotify(entity));
+        }
     }
 
     public synchronized void addEntityToSingleClient(Player player, GameEntity entity) {
-        this.addEntityDirectly(entity);
-        player.sendPacket(new PacketSceneEntityAppearNotify(entity));
+        if (this.addEntityDirectly(entity)) {
+            player.sendPacket(new PacketSceneEntityAppearNotify(entity));
+        }
     }
 
     public void addDropEntity(GameItem item, GameEntity bornForm, Player player, boolean share) {
@@ -376,11 +463,14 @@ public class Scene {
             return;
         }
 
+        List<GameEntity> added = new ArrayList<>();
         for (var entity : entities) {
-            this.addEntityDirectly(entity);
+            if (this.addEntityDirectly(entity)) {
+                added.add(entity);
+            }
         }
 
-        for (var l : chopped(new ArrayList<>(entities), 100)) {
+        for (var l : chopped(added, 100)) {
             this.broadcastPacket(new PacketSceneEntityAppearNotify(l, visionType));
         }
     }
@@ -388,6 +478,10 @@ public class Scene {
     private GameEntity removeEntityDirectly(GameEntity entity) {
         var removed = getEntities().remove(entity.getId());
         if (removed != null) {
+            String identityKey = entityIdentityKey(removed);
+            if (identityKey != null) {
+                this.entityIdentityKeys.remove(identityKey);
+            }
             removed.onRemoved();
         }
         return removed;
@@ -411,19 +505,20 @@ public class Scene {
                         .map(this::removeEntityDirectly)
                         .filter(Objects::nonNull)
                         .toList();
-        if (!toRemove.isEmpty()) {
-            this.broadcastPacket(new PacketSceneEntityDisappearNotify(toRemove, visionType));
+        for (var l : chopped(new ArrayList<>(toRemove), 100)) {
+            this.broadcastPacket(new PacketSceneEntityDisappearNotify(l, visionType));
         }
     }
 
     public synchronized void replaceEntity(EntityAvatar oldEntity, EntityAvatar newEntity) {
         this.removeEntityDirectly(oldEntity);
-        this.addEntityDirectly(newEntity);
-        this.broadcastPacket(
-                new PacketSceneEntityDisappearNotify(oldEntity, VisionType.VisionType_VISION_REPLACE));
-        this.broadcastPacket(
-                new PacketSceneEntityAppearNotify(
-                        newEntity, VisionType.VisionType_VISION_REPLACE, oldEntity.getId()));
+        if (this.addEntityDirectly(newEntity)) {
+            this.broadcastPacket(
+                    new PacketSceneEntityDisappearNotify(oldEntity, VisionType.VisionType_VISION_REPLACE));
+            this.broadcastPacket(
+                    new PacketSceneEntityAppearNotify(
+                            newEntity, VisionType.VisionType_VISION_REPLACE, oldEntity.getId()));
+        }
     }
 
     public void showOtherEntities(Player player) {
@@ -435,6 +530,16 @@ public class Scene {
                                 gameEntity ->
                                         !(gameEntity instanceof Rebornable rebornable) || !rebornable.isInCD())
                         .toList();
+
+        Grasscutter.getLogger()
+                .info("[Scene] showOtherEntities player={} totalVisible={}", player.getUid(), entities.size());
+
+        // Upstream-compatible mode: send one VISION_MEET packet, exactly like girluh/LunaGC.
+        if (!GAME_OPTIONS.isPreventEntityError) {
+            player.sendPacket(
+                    new PacketSceneEntityAppearNotify(entities, VisionType.VisionType_VISION_MEET));
+            return;
+        }
 
         // The 6.7 client crashes (1,1,2 / ArgumentOutOfRangeException: index) when one
         // VISION_MEET notify contains too many entities at once (e.g. Wolvendom has 1100+).
@@ -888,7 +993,6 @@ public class Scene {
                 if (entity == null) continue;
 
                 toAdd.add(entity);
-                spawnedEntities.add(entry);
             }
         }
 
@@ -902,20 +1006,43 @@ public class Scene {
             }
         }
 
-        if (toAdd.size() > 0) {
-            toAdd.forEach(this::addEntityDirectly);
-            this.broadcastPacket(new PacketSceneEntityAppearNotify(toAdd, VisionType.VisionType_VISION_BORN));
+        if (!toAdd.isEmpty()) {
+            List<GameEntity> added = new ArrayList<>();
+            for (var entity : toAdd) {
+                if (this.addEntityDirectly(entity)) {
+                    added.add(entity);
+                    if (entity.getSpawnEntry() != null) {
+                        this.spawnedEntities.add(entity.getSpawnEntry());
+                    }
+                }
+            }
+            for (var l : chopped(added, 100)) {
+                this.broadcastPacket(new PacketSceneEntityAppearNotify(l, VisionType.VisionType_VISION_BORN));
+            }
         }
 
-        if (toRemove.size() > 0) {
-            toRemove.forEach(this::removeEntityDirectly);
-            this.broadcastPacket(
-                    new PacketSceneEntityDisappearNotify(toRemove, VisionType.VisionType_VISION_REMOVE));
+        if (!toRemove.isEmpty()) {
+            List<GameEntity> removed = new ArrayList<>();
+            for (var entity : toRemove) {
+                if (this.removeEntityDirectly(entity) != null) {
+                    removed.add(entity);
+                }
+            }
+            for (var l : chopped(removed, 100)) {
+                this.broadcastPacket(
+                        new PacketSceneEntityDisappearNotify(l, VisionType.VisionType_VISION_REMOVE));
+            }
             blossomManager.recycleGadgetEntity(toRemove);
         }
     }
 
     public List<SceneBlock> getPlayerActiveBlocks(Player player) {
+        if (GAME_OPTIONS.isPreventEntityError) {
+            return SceneIndexManager.queryNeighbors(
+                    getScriptManager().getBlocksIndex(),
+                    player.getPosition().toXZDoubleArray(),
+                    MAX_ENTITY_LOAD_RANGE);
+        }
 
         return SceneIndexManager.queryNeighbors(
                 getScriptManager().getBlocksIndex(),
@@ -923,16 +1050,54 @@ public class Scene {
                 Grasscutter.getConfig().server.game.loadEntitiesForPlayerRange);
     }
 
-    public Set<Integer> getPlayerActiveGroups(Player player) {
-
+    public Set<SceneGroup> getPlayerActiveGroups(Player player) {
+        Set<SceneGroup> activeGroups = new HashSet<>();
         Position playerPosition = player.getPosition();
-        Set<Integer> activeGroups = new HashSet<>();
-        for (int i = 0; i < 4; i++) {
-            Grid grid = getScriptManager().getGroupGrids().get(i);
 
-            activeGroups.addAll(grid.getNearbyGroups(i, playerPosition));
+        // Upstream-compatible mode: use the original grid-based vision loading.
+        if (!GAME_OPTIONS.isPreventEntityError) {
+            Set<Integer> activeGroupIds = new HashSet<>();
+            for (int i = 0; i < 4; i++) {
+                Grid grid = getScriptManager().getGroupGrids().get(i);
+
+                activeGroupIds.addAll(grid.getNearbyGroups(i, playerPosition));
+            }
+
+            for (int groupId : activeGroupIds) {
+                for (var block : scriptManager.getBlocks().values()) {
+                    loadBlock(block);
+                    if (block.groups == null) continue;
+                    SceneGroup group = block.groups.getOrDefault(groupId, null);
+                    if (group != null && !group.dynamic_load) {
+                        activeGroups.add(group);
+                        break;
+                    }
+                }
+            }
+            return activeGroups;
         }
 
+        // Prevention mode: do NOT scan the whole scene. Only scan the block(s) that
+        // actually contain the player, then filter groups by a 500m XZ distance.
+        var blocks = SceneIndexManager.queryNeighbors(
+                getScriptManager().getBlocksIndex(),
+                playerPosition.toXZDoubleArray(),
+                0);
+        for (var block : blocks) {
+            if (block.groups == null) {
+                this.loadBlock(block);
+            }
+            if (block.groups == null) continue;
+
+            for (var group : block.groups.values()) {
+                if (group.dynamic_load || group.pos == null) continue;
+                double dx = playerPosition.getX() - group.pos.getX();
+                double dz = playerPosition.getZ() - group.pos.getZ();
+                if (dx * dx + dz * dz <= (double) MAX_ENTITY_LOAD_RANGE * MAX_ENTITY_LOAD_RANGE) {
+                    activeGroups.add(group);
+                }
+            }
+        }
         return activeGroups;
     }
 
@@ -945,15 +1110,88 @@ public class Scene {
     }
 
     public void checkGroups() {
+        if (!GAME_OPTIONS.isPreventEntityError) {
+            checkGroupsUpstream();
+            return;
+        }
+
+        // Collect candidate groups only from the player's current block (500m max distance).
+        Map<Integer, SceneGroup> candidatesById = new HashMap<>();
+        for (Player player : this.players) {
+            for (SceneGroup group : getPlayerActiveGroups(player)) {
+                candidatesById.putIfAbsent(group.id, group);
+            }
+        }
+
+        List<SceneGroup> candidates = new ArrayList<>(candidatesById.values());
+        candidates.sort(Comparator.comparingDouble(this::minDistanceSqToPlayers));
+
+        // Greedily keep the nearest groups until the scene entity budget is reached.
+        Set<SceneGroup> visible = new HashSet<>();
+        int estimatedEntities = 0;
+        for (SceneGroup group : candidates) {
+            int groupSize = estimateGroupEntityCount(group);
+            if (estimatedEntities + groupSize > GAME_OPTIONS.sceneEntityLimit && !visible.isEmpty()) {
+                break;
+            }
+            visible.add(group);
+            estimatedEntities += groupSize;
+        }
+
+        // Avoid unloading groups while a player is still entering the scene. The client
+        // has not finished registering those groups yet, so an early GroupUnloadNotify
+        // produces "invalid group" spam and can corrupt the client's scene-node state
+        // (ArgumentOutOfRangeException / 112 right after EnterScenePostFinish).
+        boolean anyPlayerStillLoading =
+                this.players.stream()
+                        .anyMatch(p -> p.getSceneLoadState() != Player.SceneLoadState.LOADED);
+        if (!anyPlayerStillLoading) {
+            for (var group : this.loadedGroups) {
+                if (!visible.contains(group) && !group.dynamic_load && !group.dontUnload) {
+                    long loadTime = this.groupLoadTimes.getOrDefault(group.id, 0L);
+                    if (System.currentTimeMillis() - loadTime < GROUP_UNLOAD_GRACE_PERIOD_MS) {
+                        continue;
+                    }
+                    unloadGroup(scriptManager.getBlocks().get(group.block_id), group.id);
+                }
+            }
+        }
+
+        var toLoad =
+                visible.stream()
+                        .filter(g -> this.loadedGroups.stream().noneMatch(gr -> gr.id == g.id))
+                        .filter(g -> !g.dynamic_load)
+                        .toList();
+
+        this.onLoadGroup(toLoad);
+        if (!toLoad.isEmpty()) this.onRegisterGroups();
+    }
+
+    private void checkGroupsUpstream() {
         Set<Integer> visible =
                 this.players.stream()
                         .map(this::getPlayerActiveGroups)
                         .flatMap(Collection::stream)
+                        .map(group -> group.id)
                         .collect(Collectors.toSet());
 
-        for (var group : this.loadedGroups) {
-            if (!visible.contains(group.id) && !group.dynamic_load && !group.dontUnload)
-                unloadGroup(scriptManager.getBlocks().get(group.block_id), group.id);
+        // Avoid unloading groups while a player is still entering the scene. The client
+        // has not finished registering those groups yet, so an early GroupUnloadNotify
+        // produces "invalid group" spam and can corrupt the client's scene-node state
+        // (ArgumentOutOfRangeException / 112 right after EnterScenePostFinish).
+        boolean anyPlayerStillLoading =
+                this.players.stream()
+                        .anyMatch(p -> p.getSceneLoadState() != Player.SceneLoadState.LOADED);
+        if (!anyPlayerStillLoading) {
+            for (var group : this.loadedGroups) {
+                if (!visible.contains(group.id) && !group.dynamic_load && !group.dontUnload) {
+                    long loadTime = this.groupLoadTimes.getOrDefault(group.id, 0L);
+                    if (System.currentTimeMillis() - loadTime < GROUP_UNLOAD_GRACE_PERIOD_MS) {
+                        continue;
+                    }
+                    unloadGroup(scriptManager.getBlocks().get(group.block_id), group.id);
+                }
+            }
         }
 
         var toLoad =
@@ -963,6 +1201,7 @@ public class Scene {
                                 g -> {
                                     for (var b : scriptManager.getBlocks().values()) {
                                         loadBlock(b);
+                                        if (b.groups == null) continue;
                                         SceneGroup group = b.groups.getOrDefault(g, null);
                                         if (group != null && !group.dynamic_load) return group;
                                     }
@@ -974,6 +1213,25 @@ public class Scene {
 
         this.onLoadGroup(toLoad);
         if (!toLoad.isEmpty()) this.onRegisterGroups();
+    }
+
+    private double minDistanceSqToPlayers(SceneGroup group) {
+        if (group.pos == null) return Double.MAX_VALUE;
+        double min = Double.MAX_VALUE;
+        for (Player player : this.players) {
+            double dx = player.getPosition().getX() - group.pos.getX();
+            double dz = player.getPosition().getZ() - group.pos.getZ();
+            min = Math.min(min, dx * dx + dz * dz);
+        }
+        return min;
+    }
+
+    private int estimateGroupEntityCount(SceneGroup group) {
+        int count = 0;
+        if (group.monsters != null) count += group.monsters.size();
+        if (group.gadgets != null) count += group.gadgets.size();
+        if (group.npcs != null) count += group.npcs.size();
+        return Math.max(1, count);
     }
 
     public void onLoadBlock(SceneBlock block, List<Player> players) {
@@ -1107,6 +1365,7 @@ public class Scene {
                     .refreshGroup(groupInstance, 0, false);
 
             this.loadedGroups.add(group);
+            this.groupLoadTimes.put(group.id, System.currentTimeMillis());
         }
 
         this.scriptManager.meetEntities(entities);
@@ -1116,50 +1375,102 @@ public class Scene {
         Grasscutter.getLogger().trace("Scene {} loaded {} group(s)", this.getId(), groups.size());
     }
 
+    public void registerClientGroup(int groupId) {
+        this.clientKnownGroups.add(groupId);
+    }
+
+    public void registerClientGroups(Collection<Integer> groupIds) {
+        this.clientKnownGroups.addAll(groupIds);
+    }
+
     public void unloadGroup(SceneBlock block, int group_id) {
+        // Block metadata (SceneBlock.groups) may not be loaded yet for freshly-created
+        // accounts. Be null-safe so a failed unload doesn't abort the surrounding
+        // daily-commission group refresh (previously NPE: block.groups is null).
         List<GameEntity> toRemove =
                 this.getEntities().values().stream()
-                        .filter(e -> e != null && (e.getBlockId() == block.id && e.getGroupId() == group_id))
+                        .filter(
+                                e ->
+                                        e != null
+                                                && (block == null || e.getBlockId() == block.id)
+                                                && e.getGroupId() == group_id)
                         .toList();
 
-        if (toRemove.size() > 0) {
-            toRemove.forEach(this::removeEntityDirectly);
-            this.broadcastPacket(
-                    new PacketSceneEntityDisappearNotify(toRemove, VisionType.VisionType_VISION_REMOVE));
+        if (!toRemove.isEmpty()) {
+            List<GameEntity> removed = new ArrayList<>();
+            for (var entity : toRemove) {
+                if (this.removeEntityDirectly(entity) != null) {
+                    removed.add(entity);
+                }
+            }
+            for (var l : chopped(removed, 100)) {
+                this.broadcastPacket(
+                        new PacketSceneEntityDisappearNotify(l, VisionType.VisionType_VISION_REMOVE));
+            }
         }
 
-        var group = block.groups.get(group_id);
-        if (group.triggers != null) {
-            group.triggers.values().forEach(getScriptManager()::deregisterTrigger);
-        }
-        if (group.regions != null) {
-            group.regions.values().forEach(getScriptManager()::deregisterRegion);
-        }
-        if (challenge != null && group.id == challenge.getGroup().id) {
-            challenge.fail();
+        SceneGroup group = block == null || block.groups == null ? null : block.groups.get(group_id);
+        if (group == null) {
+            group =
+                    this.loadedGroups.stream()
+                            .filter(loaded -> loaded.id == group_id)
+                            .findFirst()
+                            .orElse(null);
         }
 
-        scriptManager.getLoadedGroupSetPerBlock().get(block.id).remove(group);
-        this.loadedGroups.remove(group);
-
-        if (this.scriptManager.getLoadedGroupSetPerBlock().get(block.id).isEmpty()) {
-            this.scriptManager.getLoadedGroupSetPerBlock().remove(block.id);
-            Grasscutter.getLogger().trace("Scene {} block {} is unloaded.", this.getId(), block.id);
+        if (group != null) {
+            if (group.triggers != null) {
+                group.triggers.values().forEach(getScriptManager()::deregisterTrigger);
+            }
+            if (group.regions != null) {
+                group.regions.values().forEach(getScriptManager()::deregisterRegion);
+            }
+            if (challenge != null && group.id == challenge.getGroup().id) {
+                challenge.fail();
+            }
         }
 
-        this.broadcastPacket(new PacketGroupUnloadNotify(List.of(group_id)));
-        this.scriptManager.unregisterGroup(group);
+        if (block != null) {
+            var loadedGroupsForBlock = this.scriptManager.getLoadedGroupSetPerBlock().get(block.id);
+            if (loadedGroupsForBlock != null) {
+                loadedGroupsForBlock.removeIf(loaded -> loaded.id == group_id);
+                if (loadedGroupsForBlock.isEmpty()) {
+                    this.scriptManager.getLoadedGroupSetPerBlock().remove(block.id);
+                    Grasscutter.getLogger()
+                            .trace("Scene {} block {} is unloaded.", this.getId(), block.id);
+                }
+            }
+        }
+
+        this.loadedGroups.removeIf(loaded -> loaded.id == group_id);
+        this.groupLoadTimes.remove(group_id);
+
+        // Upstream-compatible mode sends GroupUnloadNotify unconditionally.
+        // Prevention mode only sends it for groups explicitly registered on the client
+        // through GroupSuiteNotify. Normal big-world groups are never registered that way,
+        // so sending GroupUnloadNotify for them makes the client log
+        // "LightWeightInstanceManager::UnregisterModularGroupInternal, invalid group"
+        // and can contribute to "node cnt out of index" crashes during scene entry.
+        if (group != null
+                && (!GAME_OPTIONS.isPreventEntityError || this.clientKnownGroups.contains(group_id))) {
+            if (GAME_OPTIONS.isPreventEntityError) {
+                this.clientKnownGroups.remove(group_id);
+            }
+            this.broadcastPacket(new PacketGroupUnloadNotify(List.of(group_id)));
+            this.scriptManager.unregisterGroup(group);
+        }
     }
 
     public void onPlayerCreateGadget(EntityClientGadget gadget) {
         var owner = gadget.getOwner();
 
-        this.addEntityDirectly(gadget);
-        owner.getTeamManager().getGadgets().add(gadget);
+        if (this.addEntityDirectly(gadget)) {
+            owner.getTeamManager().getGadgets().add(gadget);
 
-        for (var player : this.getPlayers()) {
-            if (player != owner) {
-                player.getSession().send(new PacketSceneEntityAppearNotify(gadget));
+            for (var player : this.getPlayers()) {
+                if (player != owner) {
+                    player.getSession().send(new PacketSceneEntityAppearNotify(gadget));
+                }
             }
         }
     }
@@ -1274,6 +1585,8 @@ public class Scene {
                 });
 
         if (sceneNpcBornEntries.size() > 0) {
+            this.registerClientGroups(
+                    sceneNpcBornEntries.stream().map(SceneNpcBornEntry::getGroupId).toList());
             this.broadcastPacket(new PacketGroupSuiteNotify(sceneNpcBornEntries));
             Grasscutter.getLogger().trace("Loaded Npc Group Suite {}", sceneNpcBornEntries);
         }

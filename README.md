@@ -13,6 +13,14 @@ This fork is based on [girluh/LunaGC](https://github.com/girluh/LunaGC) (`6.7.0`
 - Commission groups are now streamed by distance (load within 500m, unload beyond 1200m) instead of loading all four at once; this avoids stacking distant commission entities onto a scene transition and reduces (1,1,2) crash risk.
 - Crash diagnostics: `tools/monitor_client_crash.ps1` watches the client output log for fatal .NET exceptions and automatically captures recent server logs, GC, jstack and port state into `crash-diagnostics/`; `tools/capture_crash_diag.ps1` can be run manually.
 
+### Chest/drop fixes + dynamic entity loading (2026-08-16)
+- `/spawn` with `group`/`config` now loads the real `SceneGadget` and calls `buildContent()`, so spawned chests are interactive and can trigger drops.
+- `EntityItem` restores `TrifleGadget`, making drops render correctly and stay pickable; `getFightProperties()` no longer returns null, fixing related NPEs.
+- `GadgetChest` falls back to the legacy drop system when `metaGadget` is null instead of crashing.
+- `checkGroups` no longer scans the whole scene: it only scans the player's current `SceneBlock`, filters groups within 500m, and greedily keeps the nearest groups up to `sceneEntityLimit=409`.
+- `Grid` / `SpawnDataEntry` hard caps raised to 500m.
+- Fixed recursive double-loading of the same group in `SceneScriptManager.getGroupById` / `getCachedGroupInstanceById` (`findGroupById`), which was creating duplicate monsters/chests and is the most likely remaining root cause of (1,1,2).
+
 ### Account & authentication
 - Password login locks the entered password (BCrypt-hashed) on first login, covering both auto-created accounts and legacy accounts with an empty password. `Account.verifyPassword` now accepts both BCrypt-hashed and legacy plaintext passwords.
 - Combo-login and stoken verification are lenient: if the stored session key differs (e.g. the client cached a token from another session/server), the client's token is adopted so login succeeds instead of failing with a session-key error.

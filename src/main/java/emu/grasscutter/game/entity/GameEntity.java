@@ -150,21 +150,24 @@ public abstract class GameEntity {
     }
 
     public float getFightProperty(FightProperty prop) {
-        return this.getFightProperties().getOrDefault(prop.getId(), 0f);
+        var props = this.getFightProperties();
+        return props == null ? 0f : props.getOrDefault(prop.getId(), 0f);
     }
 
     public boolean hasFightProperty(FightProperty prop) {
-        return this.getFightProperties().containsKey(prop.getId());
+        var props = this.getFightProperties();
+        return props != null && props.containsKey(prop.getId());
     }
 
     public void addAllFightPropsToEntityInfo(SceneEntityInfo.Builder entityInfo) {
-        this.getFightProperties()
-                .forEach(
-                        (key, value) -> {
-                            if (key == 0) return;
-                            entityInfo.addFightPropList(
-                                    FightPropPair.newBuilder().setPropType(key).setPropValue(value).build());
-                        });
+        var props = this.getFightProperties();
+        if (props == null) return;
+        props.forEach(
+                (key, value) -> {
+                    if (key == 0) return;
+                    entityInfo.addFightPropList(
+                            FightPropPair.newBuilder().setPropType(key).setPropValue(value).build());
+                });
     }
 
     protected void setLimbo(float hpThreshold) {

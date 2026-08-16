@@ -318,6 +318,7 @@ public class SceneScriptManager {
                         suiteId,
                         false); // If suiteId is zero, the value of suiteId changes
         scene.broadcastPacket(new PacketGroupSuiteNotify(groupId, suiteId));
+        scene.registerClientGroup(groupId);
 
         return true;
     }
@@ -398,6 +399,7 @@ public class SceneScriptManager {
     public SceneGroup getGroupById(int groupId) {
         for (var block : getBlocks().values()) {
             this.getScene().loadBlock(block);
+            if (block.groups == null) continue;
 
             var group = block.groups.get(groupId);
             if (group == null) {
@@ -409,6 +411,24 @@ public class SceneScriptManager {
                 this.getScene().onRegisterGroups();
             }
             return group;
+        }
+        return null;
+    }
+
+    /**
+     * Finds a group in the loaded block metadata without triggering onLoadGroup.
+     * Used while a group is already being loaded, to avoid recursively loading the
+     * same group (which caused duplicate monsters/gadgets to be created).
+     */
+    private SceneGroup findGroupById(int groupId) {
+        for (var block : getBlocks().values()) {
+            this.getScene().loadBlock(block);
+            if (block.groups == null) continue;
+
+            var group = block.groups.get(groupId);
+            if (group != null) {
+                return group;
+            }
         }
         return null;
     }
@@ -428,7 +448,7 @@ public class SceneScriptManager {
             if (instance != null) {
                 cachedSceneGroupsInstances.put(groupId, instance);
                 this.cachedSceneGroupsInstances.get(groupId).setCached(false);
-                this.cachedSceneGroupsInstances.get(groupId).setLuaGroup(getGroupById(groupId));
+                this.cachedSceneGroupsInstances.get(groupId).setLuaGroup(findGroupById(groupId));
             }
         }
 

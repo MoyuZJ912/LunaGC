@@ -19,13 +19,17 @@ import emu.grasscutter.net.proto.ProtEntityTypeOuterClass.ProtEntityType;
 import emu.grasscutter.net.proto.SceneEntityAiInfoOuterClass.SceneEntityAiInfo;
 import emu.grasscutter.net.proto.SceneEntityInfoOuterClass.SceneEntityInfo;
 import emu.grasscutter.net.proto.SceneGadgetInfoOuterClass.SceneGadgetInfo;
+import emu.grasscutter.net.proto.TrifleGadgetOuterClass.TrifleGadget;
 import emu.grasscutter.net.proto.VectorOuterClass.Vector;
 import emu.grasscutter.server.packet.send.PacketGadgetInteractRsp;
 import emu.grasscutter.utils.helpers.ProtoHelper;
 import it.unimi.dsi.fastutil.ints.Int2FloatMap;
+import it.unimi.dsi.fastutil.ints.Int2FloatMaps;
 import lombok.Getter;
 
 public class EntityItem extends EntityBaseGadget {
+    private static final Int2FloatMap EMPTY_FIGHT_PROPERTIES = Int2FloatMaps.EMPTY_MAP;
+
     @Getter private final GameItem item;
     @Getter private final long guid;
     @Getter private final boolean share;
@@ -80,7 +84,9 @@ public class EntityItem extends EntityBaseGadget {
 
     @Override
     public Int2FloatMap getFightProperties() {
-        return null;
+        // Dropped items have no combat stats. Never return null: plugins and generic
+        // entity tooling may call getFightProperty() directly on any visible entity.
+        return EMPTY_FIGHT_PROPERTIES;
     }
 
     @Override
@@ -146,7 +152,7 @@ public class EntityItem extends EntityBaseGadget {
         SceneGadgetInfo.Builder gadgetInfo =
                 SceneGadgetInfo.newBuilder()
                         .setGadgetId(this.getItemData().getGadgetId())
-                        // .setTrifleGadget(TrifleGadget.newBuilder().setItem(this.getItem().toProto()))
+                        .setTrifleGadget(TrifleGadget.newBuilder().setItem(this.getItem().toProto()))
                         .setBornType(GadgetBornType.GadgetBornType_GADGET_BORN_IN_AIR)
                         .setAuthorityPeerId(this.getWorld().getHostPeerId())
                         .setIsEnableInteract(true);
@@ -158,7 +164,6 @@ public class EntityItem extends EntityBaseGadget {
 
     @Override
     public void initAbilities() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'initAbilities'");
+        // Dropped items are pure trifle gadgets and have no config abilities.
     }
 }

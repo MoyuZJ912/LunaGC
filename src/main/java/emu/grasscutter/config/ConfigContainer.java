@@ -177,7 +177,7 @@ public class ConfigContainer {
         public boolean useXorEncryption = true;
 
         /* Entities within a certain range will be loaded for the player */
-        public int loadEntitiesForPlayerRange = 300;
+        public int loadEntitiesForPlayerRange = 500;
         /* Start in 'unstable-quests', Lua scripts will be enabled by default. */
         public boolean enableScriptInBigWorld = true;
         public boolean enableConsole = true;
@@ -270,7 +270,18 @@ public class ConfigContainer {
     public static class GameOptions {
         public InventoryLimits inventoryLimits = new InventoryLimits();
         public AvatarLimits avatarLimits = new AvatarLimits();
-        public int sceneEntityLimit = 1000; // Unenforced. TODO: Implement.
+        public int sceneEntityLimit = 409; // Nearest-N dynamic loading, bounded to the player's current block.
+
+        /**
+         * When true, apply all entity-error prevention fixes (hard cap, 200m load,
+         * chunked VISION_MEET, known-group-only GroupUnloadNotify).
+         * When false, use upstream girluh/LunaGC behavior: no entity cap, no 200m
+         * hard cap, single VISION_MEET packet, and unconditional GroupUnloadNotify.
+         */
+        public boolean isPreventEntityError = true;
+
+        /** When false, the daily-commission system is completely disabled and not loaded. */
+        public boolean isEnableDailyTask = true;
 
         public boolean watchGachaConfig = false;
         public boolean enableShopItems = false;
