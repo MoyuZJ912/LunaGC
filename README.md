@@ -4,6 +4,10 @@
 
 This fork is based on [girluh/LunaGC](https://github.com/girluh/LunaGC) (`6.7.0` branch) with the following additions for a private-server deployment:
 
+### 2026-08-17 仓库基底修正 / Repository base correction
+本仓库已完全切换到 `girluh/LunaGC` 基底，仅保留私服功能改动，不再包含 fjyczcr 系提交历史。
+This repository is now based purely on `girluh/LunaGC`; the fjyczcr-based history has been removed.
+
 ### Daily commissions & (1,1,2) crash fixes (2026-08-15)
 - Daily commissions are fully playable end-to-end: dispatch -> scene-group load -> kill counting -> completion -> rewards -> client panel refresh.
 - Fixed kill counting: `GameEntity.damage()` now forwards `killerId`, so normal attacks, skills, summons and elemental-reaction kills all advance commission progress.
