@@ -105,7 +105,7 @@ public final class AttackResultOuterClass {
     float getDamage();
 
     /**
-     * <code>uint32 defense_id = 14;</code>
+     * <code>uint32 defense_id = 12;</code>
      * @return The defenseId.
      */
     int getDefenseId();
@@ -246,7 +246,7 @@ public final class AttackResultOuterClass {
 
               break;
             }
-            case 112: {
+            case 96: {
 
               defenseId_ = input.readUInt32();
               break;
@@ -646,10 +646,10 @@ public final class AttackResultOuterClass {
       return damage_;
     }
 
-    public static final int DEFENSE_ID_FIELD_NUMBER = 14;
+    public static final int DEFENSE_ID_FIELD_NUMBER = 12;
     private int defenseId_;
     /**
-     * <code>uint32 defense_id = 14;</code>
+     * <code>uint32 defense_id = 12;</code>
      * @return The defenseId.
      */
     @java.lang.Override
@@ -825,7 +825,7 @@ public final class AttackResultOuterClass {
         output.writeMessage(5, getAbilityIdentifier());
       }
       if (defenseId_ != 0) {
-        output.writeUInt32(14, defenseId_);
+        output.writeUInt32(12, defenseId_);
       }
       if (aDIAGMANJIC_ != 0) {
         output.writeUInt32(213, aDIAGMANJIC_);
@@ -925,7 +925,7 @@ public final class AttackResultOuterClass {
       }
       if (defenseId_ != 0) {
         size += com.google.protobuf.CodedOutputStream
-          .computeUInt32Size(14, defenseId_);
+          .computeUInt32Size(12, defenseId_);
       }
       if (aDIAGMANJIC_ != 0) {
         size += com.google.protobuf.CodedOutputStream
@@ -2372,7 +2372,7 @@ public final class AttackResultOuterClass {
 
       private int defenseId_ ;
       /**
-       * <code>uint32 defense_id = 14;</code>
+       * <code>uint32 defense_id = 12;</code>
        * @return The defenseId.
        */
       @java.lang.Override
@@ -2380,7 +2380,7 @@ public final class AttackResultOuterClass {
         return defenseId_;
       }
       /**
-       * <code>uint32 defense_id = 14;</code>
+       * <code>uint32 defense_id = 12;</code>
        * @param value The defenseId to set.
        * @return This builder for chaining.
        */
@@ -2391,7 +2391,7 @@ public final class AttackResultOuterClass {
         return this;
       }
       /**
-       * <code>uint32 defense_id = 14;</code>
+       * <code>uint32 defense_id = 12;</code>
        * @return This builder for chaining.
        */
       public Builder clearDefenseId() {
@@ -2851,7 +2851,7 @@ public final class AttackResultOuterClass {
       "\r\022\024\n\013NGGDHKNLAIB\030\234\r \001(\002\022\024\n\013JCLCJAFKOAB\030\231" +
       "\016 \001(\002\022\024\n\013HPNOGNFPMBN\030\200\003 \001(\002\022\023\n\013attacker_" +
       "id\030\001 \001(\r\022\024\n\013CILLGDKJIFC\030\307\r \001(\r\022\016\n\006damage" +
-      "\030\003 \001(\002\022\022\n\ndefense_id\030\016 \001(\r\022\024\n\013ALOBPPIOOP" +
+      "\030\003 \001(\002\022\022\n\ndefense_id\030\014 \001(\r\022\024\n\013ALOBPPIOOP" +
       "K\030\242\013 \001(\r\022\024\n\013PJHBIJMIENL\030\264\014 \001(\r\022\024\n\013AMDCFH" +
       "ADHFP\030\236\014 \001(\r\022\024\n\013ADIAGMANJIC\030\325\001 \001(\r\022\024\n\013CK" +
       "NDANBNFMI\030\327\007 \001(\010\022\024\n\013HNJDMGNPBJG\030\277\004 \001(\010\022\024" +
